@@ -1,4 +1,5 @@
 import { Store } from '../stores/store';
+import { v4 as uuidV4 } from 'uuid';
 
 export type UserState = 'untracked' | 'tracked';
 
@@ -8,8 +9,7 @@ export class User {
     let state: UserState = 'tracked';
 
     if (!id) {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      id = require('uuid/v4')();
+      id = uuidV4();
       store.set('uuid', id);
     }
 
