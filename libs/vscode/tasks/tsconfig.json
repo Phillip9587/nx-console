@@ -4,6 +4,36 @@
   "include": [],
   "references": [
     {
+      "path": "../configuration"
+    },
+    {
+      "path": "../../shared/file-system"
+    },
+    {
+      "path": "../utils"
+    },
+    {
+      "path": "../../shared/utils"
+    },
+    {
+      "path": "../../shared/types"
+    },
+    {
+      "path": "../output-channels"
+    },
+    {
+      "path": "../../shared/schema"
+    },
+    {
+      "path": "../telemetry"
+    },
+    {
+      "path": "../nx-cli-quickpicks"
+    },
+    {
+      "path": "../nx-workspace"
+    },
+    {
       "path": "./tsconfig.lib.json"
     },
     {

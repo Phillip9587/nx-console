@@ -1,16 +1,22 @@
 {
   "extends": "../../../tsconfig.base.json",
-  "compilerOptions": {
-    "types": ["jest", "node"]
-  },
   "files": [],
   "include": [],
   "references": [
     {
-      "path": "./tsconfig.lib.json"
+      "path": "../schema"
     },
     {
-      "path": "./tsconfig.spec.json"
+      "path": "../types"
+    },
+    {
+      "path": "../npm"
+    },
+    {
+      "path": "../file-system"
+    },
+    {
+      "path": "./tsconfig.lib.json"
     }
   ]
 }

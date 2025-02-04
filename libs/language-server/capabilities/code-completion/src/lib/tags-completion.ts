@@ -1,5 +1,5 @@
-import { isArrayNode } from '@nx-console/language-server/utils';
-import { nxWorkspace } from '@nx-console/language-server/workspace';
+import { isArrayNode } from '@nx-console/language-server-utils';
+import { nxWorkspace } from '@nx-console/language-server-workspace';
 import {
   ASTNode,
   CompletionItem,
@@ -19,10 +19,10 @@ export async function tagsCompletion(
 
   const tagCompletion: CompletionItem[] = [];
 
-  const { workspace } = await nxWorkspace(workingPath);
+  const { projectGraph } = await nxWorkspace(workingPath);
   const tags = new Set<string>();
-  for (const projectConfiguration of Object.values(workspace.projects)) {
-    for (const tag of projectConfiguration.tags ?? []) {
+  for (const projectConfiguration of Object.values(projectGraph.nodes)) {
+    for (const tag of projectConfiguration.data.tags ?? []) {
       tags.add(tag);
     }
   }

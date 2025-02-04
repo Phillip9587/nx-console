@@ -1,7 +1,0 @@
-{
-    "targets": {
-        "test": {
-            "executor": "@nrwl/jest:jest"
-          }
-    }
-}

@@ -1,4 +1,4 @@
-import { hasKey } from '@nx-console/shared/utils';
+import { hasKey } from '@nx-console/shared-utils';
 import { JSONSchema } from 'vscode-json-languageservice';
 
 export const X_COMPLETION_TYPE = 'x-completion-type' as const;
@@ -7,13 +7,18 @@ export const X_COMPLETION_GLOB = 'x-completion-glob' as const;
 export enum CompletionType {
   file = 'file',
   directory = 'directory',
+  // support for projectName:build auto complete
   projectTarget = 'projectTarget',
   projects = 'projects',
   targets = 'targets',
+  // support for target with ^ (^build, build, etc)
   targetsWithDeps = 'targetsWithDeps',
   tags = 'tags',
   inputName = 'inputName',
+  // support for input names with ^ (^production, production, etc)
   inputNameWithDeps = 'inputNameWithDeps',
+  // support for inference plugins like @nx/eslint/plugin
+  inferencePlugins = 'inferencePlugins',
 }
 
 export function hasCompletionType(

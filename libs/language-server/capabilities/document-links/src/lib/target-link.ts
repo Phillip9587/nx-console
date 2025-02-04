@@ -1,12 +1,12 @@
-import { parseTargetString } from '@nrwl/devkit/src/executors/parse-target-string';
-import { fileExists, readFile } from '@nx-console/shared/file-system';
 import {
   findProperty,
   getLanguageModelCache,
   isStringNode,
   lspLogger,
-} from '@nx-console/language-server/utils';
-import { nxWorkspace } from '@nx-console/language-server/workspace';
+} from '@nx-console/language-server-utils';
+import { nxWorkspace } from '@nx-console/language-server-workspace';
+import { fileExists, readFile } from '@nx-console/shared-file-system';
+import { parseTargetString } from '@nx-console/shared-utils';
 import { join } from 'path';
 import {
   ASTNode,
@@ -27,27 +27,32 @@ export async function targetLink(
     return;
   }
 
+  const { projectGraph } = await nxWorkspace(workingPath);
+
   const targetString = node.value;
   let project, target, configuration;
   try {
-    const parsedTargets = parseTargetString(targetString);
-    project = parsedTargets.project;
-    target = parsedTargets.target;
-    configuration = parsedTargets.configuration;
+    const parsedTarget = await parseTargetString(
+      targetString,
+      projectGraph,
+      workingPath
+    );
+
+    project = parsedTarget.project;
+    target = parsedTarget.target;
+    configuration = parsedTarget.configuration;
   } catch (e) {
     return;
   }
 
-  const { workspace } = await nxWorkspace(workingPath, lspLogger);
-
-  const workspaceProject = workspace.projects[project];
+  const workspaceProject = projectGraph.nodes[project];
 
   if (!workspaceProject) {
     lspLogger.log(`Could not find project ${project}`);
     return;
   }
 
-  const baseTargetPath = join(workingPath, workspaceProject.root);
+  const baseTargetPath = join(workingPath, workspaceProject.data.root);
   const baseTargetProjectPath = join(baseTargetPath, 'project.json');
 
   if (!(await fileExists(baseTargetProjectPath))) {
@@ -65,7 +70,8 @@ export async function targetLink(
     tempDocumentCounter.set(baseTargetProjectPath, versionNumber);
   }
 
-  const { document, jsonAst } = getLanguageModelCache().retrieve(
+  const languageModelCache = getLanguageModelCache();
+  const { document, jsonAst } = languageModelCache.retrieve(
     TextDocument.create(
       baseTargetProjectPath,
       'json',
@@ -74,8 +80,11 @@ export async function targetLink(
     ),
     false
   );
+  languageModelCache.dispose();
 
-  const range = findTargetRange(document, jsonAst, target, configuration);
+  const range =
+    findLinkedTargetRange(document, jsonAst, target, configuration) ??
+    findTargetsRange(document, jsonAst);
 
   if (!range) {
     return;
@@ -88,7 +97,7 @@ export async function targetLink(
   }).toString();
 }
 
-function findTargetRange(
+function findLinkedTargetRange(
   document: TextDocument,
   jsonAst: JSONDocument,
   target: string,
@@ -120,4 +129,21 @@ function findTargetRange(
   } else {
     return createRange(document, targetProperty);
   }
+}
+
+function findTargetsRange(
+  document: TextDocument,
+  jsonAst: JSONDocument
+): Range | undefined {
+  if (!jsonAst.root) {
+    return;
+  }
+
+  const targetNode = findProperty(jsonAst.root, 'targets');
+
+  if (!targetNode) {
+    return;
+  }
+
+  return createRange(document, targetNode);
 }

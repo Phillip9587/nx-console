@@ -4,6 +4,15 @@
   "include": [],
   "references": [
     {
+      "path": "../../shared/utils"
+    },
+    {
+      "path": "../output-channels"
+    },
+    {
+      "path": "../../language-server/types"
+    },
+    {
       "path": "./tsconfig.lib.json"
     },
     {

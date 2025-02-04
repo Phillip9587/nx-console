@@ -1,7 +1,7 @@
 import {
   findProjectRoot,
   isStringNode,
-} from '@nx-console/language-server/utils';
+} from '@nx-console/language-server-utils';
 import fastGlob from 'fast-glob';
 import {
   ASTNode,
@@ -67,12 +67,13 @@ export async function pathCompletion(
 
     if (file.path.startsWith(workingPath)) {
       const label = file.path.replace(workingPath + '/', '');
-      items.push(
-        createCompletionItem(label, file.path, node, document, completionKind)
-      );
 
       if (supportsInterpolation) {
         const label = '{workspaceRoot}' + file.path.replace(workingPath, '');
+        items.push(
+          createCompletionItem(label, file.path, node, document, completionKind)
+        );
+      } else {
         items.push(
           createCompletionItem(label, file.path, node, document, completionKind)
         );

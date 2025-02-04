@@ -4,10 +4,19 @@
   "include": [],
   "references": [
     {
-      "path": "./tsconfig.lib.json"
+      "path": "../utils"
     },
     {
-      "path": "./tsconfig.spec.json"
+      "path": "../configuration"
+    },
+    {
+      "path": "../../shared/schema"
+    },
+    {
+      "path": "../../shared/file-system"
+    },
+    {
+      "path": "./tsconfig.lib.json"
     }
   ]
 }

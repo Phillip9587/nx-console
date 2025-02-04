@@ -1,8 +1,8 @@
-import { fileExists } from '@nx-console/shared/file-system';
-import { Option, OptionType } from '@nx-console/shared/schema';
-import { NxWorkspaceConfiguration } from '@nx-console/shared/types';
-import { WorkspaceConfigurationStore } from '@nx-console/vscode/configuration';
-import { getTelemetry, readBuilderSchema } from '@nx-console/vscode/utils';
+import { fileExists } from '@nx-console/shared-file-system';
+import { Option, OptionType } from '@nx-console/shared-schema';
+import { WorkspaceConfigurationStore } from '@nx-console/vscode-configuration';
+import { readBuilderSchema } from '@nx-console/vscode-utils';
+import type { ProjectGraph } from 'nx/src/devkit-exports';
 import { join } from 'path';
 import { window } from 'vscode';
 
@@ -55,17 +55,20 @@ const RUN_ONE_OPTIONS = [
 export async function verifyBuilderDefinition(
   project: string,
   command: string,
-  workspaceJson: NxWorkspaceConfiguration,
-  workspaceType: 'ng' | 'nx'
+  projectGraph: ProjectGraph
 ): Promise<{
   validBuilder: boolean;
-  builderName: string;
+  builderName: string | undefined;
   configurations: string[];
   options: Array<Option>;
 }> {
-  const projects = workspaceJson.projects || {};
-  const projectDef = projects[project] || {};
-  const targetDef = projectDef.targets || {};
+  const projects = projectGraph.nodes || {};
+  const projectDef = projects[project] || {
+    data: {
+      targets: {},
+    },
+  };
+  const targetDef = projectDef.data.targets || {};
   const commandDef = targetDef[command] || {};
   const configurations = Object.keys(commandDef.configurations || {});
   const executorName = commandDef.executor;
@@ -75,7 +78,6 @@ export async function verifyBuilderDefinition(
       `Please update ${project}'s ${command} definition to specify a builder.`,
       'See definition'
     );
-    getTelemetry().exception('Builder part of architect definition not found');
     return {
       validBuilder: false,
       configurations,
@@ -87,7 +89,6 @@ export async function verifyBuilderDefinition(
   const options = await readBuilderSchema(
     workspacePath(),
     executorName,
-    workspaceType,
     projects,
     commandDef.options
   );
@@ -97,7 +98,6 @@ export async function verifyBuilderDefinition(
       `Builder specified for ${project} ${command} was not found in your dependencies. Check that specified builder is correct and has a corresponding entry in package.json`,
       'Show definition'
     );
-    getTelemetry().exception('Specified builder not found in dependencies');
 
     return {
       validBuilder: false,

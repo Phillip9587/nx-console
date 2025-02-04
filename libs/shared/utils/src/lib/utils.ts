@@ -1,9 +1,3 @@
-import type {
-  NxJsonConfiguration,
-  WorkspaceJsonConfiguration,
-} from '@nrwl/devkit';
-import { toNewFormat } from 'nx/src/config/workspaces';
-
 export function getPrimitiveValue(value: any): string | undefined {
   if (
     typeof value === 'string' ||
@@ -16,19 +10,10 @@ export function getPrimitiveValue(value: any): string | undefined {
   }
 }
 
-export function toWorkspaceFormat(
-  w: any
-): WorkspaceJsonConfiguration & NxJsonConfiguration {
-  const newFormat = toNewFormat(w) as WorkspaceJsonConfiguration &
-    NxJsonConfiguration;
-  const sortedProjects = Object.entries(newFormat.projects || {}).sort(
-    (projectA, projectB) => projectA[0].localeCompare(projectB[0])
-  );
-  newFormat.projects = Object.fromEntries(sortedProjects);
-  return newFormat;
-}
-
-export function hasKey<T>(obj: T, key: PropertyKey): key is keyof T {
+export function hasKey<T extends object>(
+  obj: T,
+  key: PropertyKey
+): key is keyof T {
   return key in obj;
 }
 
@@ -42,4 +27,44 @@ export function formatError(message: string, err: any): string {
     return `${message}: ${err.toString()}`;
   }
   return message;
+}
+
+export function matchWithWildcards(
+  text: string,
+  expression: string,
+  strict = true
+) {
+  const escapeRegex = (str: string) =>
+    str.replace(/([.*+?^=!:${}()|[\]/\\])/g, '\\$1');
+  return new RegExp(
+    `${strict ? '^' : ''}${expression.split('*').map(escapeRegex).join('.*')}$`
+  ).test(text);
+}
+
+export function debounce(callback: (...args: any[]) => any, wait: number) {
+  let timerId: NodeJS.Timeout;
+  return (...args: any[]) => {
+    clearTimeout(timerId);
+    timerId = setTimeout(() => {
+      return callback(...args);
+    }, wait);
+  };
+}
+
+export function withTimeout<T>(asyncFn: () => Promise<T>, timeoutMs: number) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Function timed out after ${timeoutMs} milliseconds`));
+    }, timeoutMs);
+
+    asyncFn()
+      .then((result) => {
+        clearTimeout(timer);
+        resolve(result);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
 }

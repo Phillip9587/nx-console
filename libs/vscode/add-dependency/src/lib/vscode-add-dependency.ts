@@ -1,19 +1,25 @@
+import { importNxPackagePath } from '@nx-console/shared-npm';
+import { gte } from '@nx-console/nx-version';
+import { getPackageManagerCommand } from '@nx-console/shared-utils';
+import { getNxWorkspacePath } from '@nx-console/vscode-configuration';
+import { selectFlags } from '@nx-console/vscode-nx-cli-quickpicks';
 import {
-  detectPackageManager,
-  getPackageManagerCommand,
-  PackageManager,
-  readJsonFile,
-} from '@nrwl/devkit';
-import { getGenerators } from '@nx-console/shared/collections';
-import { getNxWorkspace } from '@nx-console/vscode/nx-workspace';
-import { getGeneratorOptions, selectFlags } from '@nx-console/vscode/tasks';
+  getGeneratorOptions,
+  getGenerators,
+  getNxVersion,
+} from '@nx-console/vscode-nx-workspace';
+import { logAndShowTaskCreationError } from '@nx-console/vscode-output-channels';
+import { getTelemetry } from '@nx-console/vscode-telemetry';
 import {
   getShellExecutionForConfig,
-  getTelemetry,
-} from '@nx-console/vscode/utils';
+  resolveDependencyVersioning,
+} from '@nx-console/vscode-utils';
+import { execSync } from 'child_process';
 import { existsSync } from 'fs';
+import type { PackageManager } from 'nx/src/devkit-exports';
 import { join } from 'path';
 import { xhr, XHRResponse } from 'request-light';
+import { major } from 'semver';
 import {
   commands,
   ExtensionContext,
@@ -24,7 +30,6 @@ import {
   TaskScope,
   window,
 } from 'vscode';
-import { resolveDependencyVersioning } from './dependency-versioning';
 
 export const ADD_DEPENDENCY_COMMAND = 'nxConsole.addDependency';
 export const ADD_DEV_DEPENDENCY_COMMAND = 'nxConsole.addDevDependency';
@@ -46,7 +51,10 @@ let pkgManager: PackageManager;
 
 function vscodeAddDependencyCommand(installAsDevDependency: boolean) {
   return async () => {
-    const { workspacePath, workspaceType } = await getNxWorkspace();
+    const workspacePath = getNxWorkspacePath();
+    const { detectPackageManager } = await importNxPackagePath<
+      typeof import('nx/src/devkit-exports')
+    >(workspacePath, 'src/devkit-exports');
     pkgManager = detectPackageManager(workspacePath);
 
     const depInput = await promptForDependencyInput();
@@ -64,14 +72,14 @@ function vscodeAddDependencyCommand(installAsDevDependency: boolean) {
 
     if (dep) {
       const quickInput = showLoadingQuickInput(dep);
-      getTelemetry().featureUsed('add-dependency');
-      addDependency(dep, version, installAsDevDependency, workspacePath);
+      getTelemetry().logUsage('misc.add-dependency');
+      await addDependency(dep, version, installAsDevDependency, workspacePath);
       const disposable = tasks.onDidEndTaskProcess((taskEndEvent) => {
         if (
           taskEndEvent.execution.task.definition.type === 'nxconsole-add-dep'
         ) {
           quickInput.hide();
-          executeInitGenerator(dep, workspacePath, workspaceType);
+          executeInitGenerator(dep, workspacePath);
           disposable.dispose();
         }
       }, undefined);
@@ -125,42 +133,48 @@ function showLoadingQuickInput(dependency: string): QuickInput {
   return quickInput;
 }
 
-function addDependency(
+async function addDependency(
   dependency: string,
   version: string,
   installAsDevDependency: boolean,
   workspacePath: string
 ) {
-  const pkgManagerCommands = getPackageManagerCommand(pkgManager);
-  const pkgManagerWorkspaceFlag = getWorkspaceAddFlag(
-    pkgManager,
-    workspacePath
-  );
-  const command = `${
-    installAsDevDependency ? pkgManagerCommands.addDev : pkgManagerCommands.add
-  } ${pkgManagerWorkspaceFlag} ${dependency}@${version}`;
+  try {
+    const pkgManagerCommands = await getPackageManagerCommand(workspacePath);
+    const pkgManagerWorkspaceFlag = await getWorkspaceAddFlag(
+      pkgManager,
+      workspacePath
+    );
+    const command = `${
+      installAsDevDependency
+        ? pkgManagerCommands.addDev
+        : pkgManagerCommands.add
+    } ${pkgManagerWorkspaceFlag} ${dependency}@${version}`;
 
-  const task = new Task(
-    {
-      type: 'nxconsole-add-dep',
-    },
-    TaskScope.Workspace,
-    command,
-    pkgManager,
-    new ShellExecution(command)
-  );
-  tasks.executeTask(task);
+    const task = new Task(
+      {
+        type: 'nxconsole-add-dep',
+      },
+      TaskScope.Workspace,
+      command,
+      pkgManager,
+      new ShellExecution(command, { cwd: workspacePath })
+    );
+    tasks.executeTask(task);
+  } catch (e) {
+    logAndShowTaskCreationError(
+      e,
+      `An error occured while adding ${dependency}. Please see the logs for more information.`
+    );
+  }
 }
 
-async function executeInitGenerator(
-  dependency: string,
-  workspacePath: string,
-  workspaceType: 'ng' | 'nx'
-) {
-  const generators = await getGenerators(workspacePath, undefined, {
-    includeHidden: true,
-    includeNgAdd: true,
-  });
+async function executeInitGenerator(dependency: string, workspacePath: string) {
+  const generators =
+    (await getGenerators({
+      includeHidden: true,
+      includeNgAdd: true,
+    })) ?? [];
 
   let initGeneratorName = `${dependency}:init`;
   let initGenerator = generators.find((g) => g.name === initGeneratorName);
@@ -173,39 +187,41 @@ async function executeInitGenerator(
     return;
   }
 
-  const opts = await getGeneratorOptions(
-    workspacePath,
-    initGenerator.data.collection,
-    initGenerator.name,
-    initGenerator.path,
-    workspaceType
-  );
+  const opts =
+    (await getGeneratorOptions({
+      collection: initGenerator.data.collection,
+      name: initGenerator.name,
+      path: initGenerator.schemaPath,
+    })) ?? [];
   let selectedFlags;
   if (opts.length) {
-    selectedFlags = await selectFlags(initGenerator.name, opts, workspaceType);
+    selectedFlags = await selectFlags(initGenerator.name, opts);
   }
-  const command = `${workspaceType} g ${initGeneratorName} ${
+  const command = `nx g ${initGeneratorName} ${
     selectedFlags?.join(' ') ?? ''
   } --interactive=false`;
   const task = new Task(
-    { type: workspaceType },
+    { type: 'nx' },
     TaskScope.Workspace,
     command,
     pkgManager,
-    getShellExecutionForConfig({
+    await getShellExecutionForConfig({
       cwd: workspacePath,
       displayCommand: command,
+      encapsulatedNx: false,
+      workspacePath,
     })
   );
   tasks.executeTask(task);
 }
 
-function getDependencySuggestions(): Promise<
+async function getDependencySuggestions(): Promise<
   {
     name: string;
     description: string;
   }[]
 > {
+  const version = await getNxVersion();
   const headers = { 'Accept-Encoding': 'gzip, deflate' };
   return Promise.all([
     xhr({
@@ -228,10 +244,20 @@ function getDependencySuggestions(): Promise<
             pkg.name !== 'make-angular-cli-faster' &&
             pkg.name !== 'tao'
         )
-        .map((pkg) => ({
-          name: `@nrwl/${pkg.name}`,
-          description: pkg.description,
-        }));
+        .map((pkg) => {
+          let prefix: string;
+          if (!version) {
+            prefix = '@nx';
+          } else if (gte(version, '16.0.0')) {
+            prefix = '@nx';
+          } else {
+            prefix = '@nrwl';
+          }
+          return {
+            name: `${prefix}/${pkg.name}`,
+            description: pkg.description,
+          };
+        });
     }),
     xhr({
       url: 'https://raw.githubusercontent.com/nrwl/nx/master/community/approved-plugins.json',
@@ -248,20 +274,31 @@ function getDependencySuggestions(): Promise<
   );
 }
 
-function getWorkspaceAddFlag(
+async function getWorkspaceAddFlag(
   pkgManager: string,
   workspacePath: string
-): string {
+): Promise<string> {
+  const { readJsonFile } = await importNxPackagePath<
+    typeof import('nx/src/devkit-exports')
+  >(workspacePath, 'src/devkit-exports');
   const pkgJson = readJsonFile<{
     workspaces?: string[];
     private?: boolean;
   }>(join(workspacePath, 'package.json'));
   if (pkgManager === 'yarn') {
+    const isYarnV1 =
+      major(
+        execSync('yarn --version', {
+          windowsHide: true,
+        })
+          .toString()
+          .trim()
+      ) === 1;
     const isWorkspace =
       !!pkgJson.private &&
       !!pkgJson.workspaces &&
       pkgJson.workspaces?.length > 0;
-    return isWorkspace ? '-W' : '';
+    return isWorkspace && isYarnV1 ? '-W' : '';
   }
   if (pkgManager === 'npm') {
     const isWorkspace = !!pkgJson.workspaces && pkgJson.workspaces?.length > 0;

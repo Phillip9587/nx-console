@@ -1,15 +1,15 @@
-import { fileExists } from '@nx-console/shared/file-system';
-import {
-  CompletionType,
-  hasCompletionType,
-  X_COMPLETION_TYPE,
-} from '@nx-console/shared/json-schema';
 import {
   findProjectRoot,
   getDefaultCompletionType,
   hasDefaultCompletionType,
   isStringNode,
-} from '@nx-console/language-server/utils';
+} from '@nx-console/language-server-utils';
+import { fileExists } from '@nx-console/shared-file-system';
+import {
+  CompletionType,
+  hasCompletionType,
+  X_COMPLETION_TYPE,
+} from '@nx-console/shared-json-schema';
 import { join } from 'path';
 import {
   DocumentLink,
@@ -19,6 +19,7 @@ import {
 } from 'vscode-json-languageservice';
 import { createRange } from './create-range';
 import { targetLink } from './target-link';
+import { namedInputLink } from './named-input-link';
 
 export async function getDocumentLinks(
   workingPath: string | undefined,
@@ -75,6 +76,14 @@ export async function getDocumentLinks(
           });
         } else {
           links.push(DocumentLink.create(range, fullPath));
+        }
+        break;
+      }
+      case CompletionType.inputName:
+      case CompletionType.inputNameWithDeps: {
+        const link = await namedInputLink(workingPath, node);
+        if (link) {
+          links.push(DocumentLink.create(range, link));
         }
         break;
       }

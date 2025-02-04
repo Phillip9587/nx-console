@@ -1,1 +1,2 @@
-export * from './lib/project-graph';
+export * from './legacy-implementation/project-graph';
+export * from './init-vscode-project-graph';

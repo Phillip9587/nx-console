@@ -1,0 +1,23 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "out-tsc/vscode-error-diagnostics",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["jest.config.ts", "src/**/*.spec.ts", "src/**/*.test.ts"],
+  "references": [
+    {
+      "path": "../nx-workspace/tsconfig.lib.json"
+    },
+    {
+      "path": "../lsp-client/tsconfig.lib.json"
+    },
+    {
+      "path": "../configuration/tsconfig.lib.json"
+    },
+    {
+      "path": "../../shared/types/tsconfig.lib.json"
+    }
+  ]
+}

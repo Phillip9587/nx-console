@@ -1,18 +1,41 @@
-import type { ProjectConfiguration } from '@nrwl/devkit';
-import { JSONSchemaMap } from 'vscode-json-languageservice/lib/umd/jsonSchema';
-import { targets } from './common-json-schema';
-import { CompletionType, EnhancedJsonSchema } from './completion-type';
+import { CollectionInfo } from '@nx-console/shared-schema';
+import type { ProjectGraphProjectNode } from 'nx/src/devkit-exports';
+import type { JSONSchema } from 'vscode-json-languageservice';
+import { namedInputs, targets } from './common-json-schema';
+import { CompletionType } from './completion-type';
+import { createBuildersAndExecutorsSchema } from './create-builders-and-executors-schema';
+import { NxVersion } from '@nx-console/nx-version';
+import { workspaceDependencyPath } from '@nx-console/shared-npm';
+import { join } from 'path';
+import { readFileSync } from 'fs';
 
-export function getNxJsonSchema(
-  projects: Record<string, ProjectConfiguration>
-) {
+type JSONSchemaMap = NonNullable<JSONSchema['properties']>;
+
+export async function getNxJsonSchema(
+  collections: CollectionInfo[],
+  projects: Record<string, ProjectGraphProjectNode>,
+  nxVersion: NxVersion,
+  workspacePath: string
+): Promise<JSONSchema> {
+  const [, executors] = createBuildersAndExecutorsSchema(collections);
   const targets = getTargets(projects);
-  const contents = createJsonSchema(targets);
-  return contents;
+  const contents = createJsonSchema(executors, targets, nxVersion);
+  const staticNxJsonSchema = await getStaticNxJsonSchema(workspacePath);
+  if (!staticNxJsonSchema) {
+    return contents;
+  }
+  return {
+    allOf: [contents, staticNxJsonSchema],
+  };
 }
 
-function createJsonSchema(projectTargets: string[]): EnhancedJsonSchema {
-  const targetsSchema = (targets().additionalProperties as object) ?? {};
+function createJsonSchema(
+  executors: JSONSchema[],
+  projectTargets: string[],
+  nxVersion: NxVersion
+): JSONSchema {
+  const targetsSchema =
+    (targets(nxVersion, executors).additionalProperties as object) ?? {};
   return {
     type: 'object',
     properties: {
@@ -67,18 +90,47 @@ function createJsonSchema(projectTargets: string[]): EnhancedJsonSchema {
           ],
         },
       },
+      plugins: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            plugin: {
+              type: 'string',
+              'x-completion-type': CompletionType.inferencePlugins,
+            },
+          },
+        },
+      },
+      namedInputs: namedInputs(nxVersion),
     },
   };
 }
 
-function getTargets(projects: Record<string, ProjectConfiguration>): string[] {
+function getTargets(
+  projects: Record<string, ProjectGraphProjectNode>
+): string[] {
   const tags = new Set<string>();
 
   for (const projectConfiguration of Object.values(projects)) {
-    for (const target of Object.keys(projectConfiguration.targets ?? {})) {
+    for (const target of Object.keys(projectConfiguration.data.targets ?? {})) {
       tags.add(target);
     }
   }
 
   return Array.from(tags);
+}
+
+export async function getStaticNxJsonSchema(workspacePath: string) {
+  const nxPath = await workspaceDependencyPath(workspacePath, 'nx');
+  if (!nxPath) {
+    return;
+  }
+  try {
+    const schema = readFileSync(join(nxPath, 'schemas', 'nx-schema.json'));
+    const parsedSchema = JSON.parse(schema.toString());
+    return parsedSchema;
+  } catch (e) {
+    return;
+  }
 }

@@ -1,12 +1,32 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "../../../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "commonjs",
-    "outDir": "../../../../dist/out-tsc",
-    "declaration": true,
-    "esModuleInterop": true,
+    "outDir": "out-tsc/language-server-capabilities-code-completion",
     "types": ["node"]
   },
-  "exclude": ["jest.config.ts", "**/*.spec.ts", "**/*.test.ts"],
-  "include": ["**/*.ts"]
+  "exclude": ["out-tsc", "jest.config.ts", "**/*.spec.ts", "**/*.test.ts"],
+  "include": ["**/*.ts"],
+  "references": [
+    {
+      "path": "../../../shared/schema/tsconfig.lib.json"
+    },
+    {
+      "path": "../../../shared/npm/tsconfig.lib.json"
+    },
+    {
+      "path": "../../../shared/nx-version/tsconfig.lib.json"
+    },
+    {
+      "path": "../../../shared/types/tsconfig.lib.json"
+    },
+    {
+      "path": "../../../shared/json-schema/tsconfig.lib.json"
+    },
+    {
+      "path": "../../workspace/tsconfig.lib.json"
+    },
+    {
+      "path": "../../utils/tsconfig.lib.json"
+    }
+  ]
 }

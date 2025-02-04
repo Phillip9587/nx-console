@@ -1,36 +1,57 @@
-import { lspLogger } from '@nx-console/language-server/utils';
-import * as watcher from '@parcel/watcher';
-import { join } from 'path';
+import { lspLogger } from '@nx-console/language-server-utils';
+import { getNxVersion } from '@nx-console/language-server-workspace';
+import { debounce } from '@nx-console/shared-utils';
+import { DaemonWatcher } from './daemon-watcher';
+import { NativeWatcher } from './native-watcher';
+import { ParcelWatcher } from './parcel-watcher';
+import { gte } from '@nx-console/nx-version';
+
+let _daemonWatcher: DaemonWatcher | undefined;
+let _nativeWatcher: NativeWatcher | undefined;
 
 export async function languageServerWatcher(
   workspacePath: string,
   callback: () => unknown
 ): Promise<() => void> {
-  const subscription = await watcher.subscribe(
-    workspacePath,
-    (err, events) => {
-      if (err) {
-        lspLogger.log('Error watching files: ' + err.toString());
-      } else if (
-        events.some(
-          (e) =>
-            e.path.endsWith('project.json') ||
-            e.path.endsWith('package.json') ||
-            e.path.endsWith('nx.json') ||
-            e.path.endsWith('workspace.json')
-        )
-      ) {
-        lspLogger.log('Project configuration changed');
-        callback();
-      }
-    },
-    {
-      ignore: [join(workspacePath, 'node_modules')],
-    }
-  );
+  const version = await getNxVersion(workspacePath);
+  const debouncedCallback = debounce(callback, 1000);
 
-  return () => {
-    lspLogger.log('Unregistering file watcher');
-    subscription.unsubscribe();
-  };
+  if (gte(version, '16.4.0')) {
+    if (process.platform === 'win32') {
+      if (_nativeWatcher) {
+        _nativeWatcher.stop();
+        _nativeWatcher = undefined;
+      }
+      const nativeWatcher = new NativeWatcher(workspacePath, debouncedCallback);
+      _nativeWatcher = nativeWatcher;
+      return () => {
+        lspLogger.log('Unregistering file watcher');
+        nativeWatcher.stop();
+      };
+    } else {
+      if (_daemonWatcher) {
+        _daemonWatcher.stop();
+        _daemonWatcher = undefined;
+      }
+      const daemonWatcher = new DaemonWatcher(
+        workspacePath,
+        version,
+        debouncedCallback
+      );
+      _daemonWatcher = daemonWatcher;
+
+      await daemonWatcher.start();
+      return () => {
+        lspLogger.log('Unregistering file watcher');
+        daemonWatcher.stop();
+      };
+    }
+  } else {
+    lspLogger.log('Nx version <16.4.0, using @parcel/watcher');
+    const parcelWatcher = new ParcelWatcher(workspacePath, debouncedCallback);
+    return () => {
+      lspLogger.log('Unregistering file watcher');
+      parcelWatcher.stop();
+    };
+  }
 }

@@ -1,5 +1,5 @@
-import { ProjectsConfigurations } from '@nrwl/devkit';
-import { Schema } from 'nx/src/utils/params';
+import type { ProjectsConfigurations } from 'nx/src/devkit-exports';
+import type { Schema } from 'nx/src/utils/params';
 
 export enum OptionType {
   Any = 'any',
@@ -27,6 +27,8 @@ export interface Option extends CliOption {
   aliases: string[];
   isRequired: boolean;
   'x-dropdown'?: 'projects';
+  'x-priority'?: 'important' | 'internal';
+  'x-hint'?: string;
 }
 
 export interface ItemTooltips {
@@ -60,8 +62,8 @@ export interface TaskExecutionMessage {
 export interface TaskExecutionSchema {
   name: string;
   command: string;
+  collection?: string;
   positional: string;
-  cliName: 'nx' | 'ng';
   builder?: string;
   description: string;
   configurations?: TargetConfiguration[];
@@ -74,11 +76,30 @@ export interface TaskExecutionSchema {
   };
 }
 
-export interface CollectionInfo {
+export type CollectionInfo = GeneratorCollectionInfo | ExecutorCollectionInfo;
+
+export interface GeneratorCollectionInfo {
+  type: 'generator';
   name: string;
-  path: string;
-  type: 'executor' | 'generator';
+  /**
+   * The path to the file that lists all generators in the collection.
+   */
+  configPath: string;
+  schemaPath: string;
   data?: Generator;
+  collectionName: string;
+}
+
+export interface ExecutorCollectionInfo {
+  type: 'executor';
+  name: string;
+  /**
+   * The path to the file that lists all executors in the collection.
+   */
+  configPath: string;
+  schemaPath: string;
+  implementationPath: string;
+  collectionName: string;
 }
 
 export enum GeneratorType {
@@ -93,6 +114,7 @@ export interface Generator {
   description: string;
   options?: Option[];
   type: GeneratorType;
+  aliases: string[];
 }
 
 export interface DefaultValue {
@@ -108,7 +130,7 @@ export interface TargetConfiguration {
 export interface Targets {
   name: string;
   project: string;
-  builder: string;
+  builder: string | undefined;
   description: string;
   configurations: TargetConfiguration[];
   options: CliOption[];
@@ -120,5 +142,5 @@ export const WORKSPACE_GENERATOR_NAME_REGEX =
 export type WorkspaceProjects = ProjectsConfigurations['projects'];
 
 export interface Logger {
-  log(message: string): void;
+  log(message: string, ...args: any[]): void;
 }

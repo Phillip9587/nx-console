@@ -1,4 +1,4 @@
-import { Store } from '@nx-console/shared/schema';
+import { Store } from '@nx-console/shared-schema';
 import { ExtensionContext, Memento } from 'vscode';
 import { WorkspaceConfigKeys } from './configuration-keys';
 
@@ -39,4 +39,8 @@ export class WorkspaceConfigurationStore implements Store {
   set<T>(key: WorkspaceConfigKeys, value: T): void {
     this.state.update(key, value);
   }
+}
+
+export function getNxWorkspacePath(): string {
+  return WorkspaceConfigurationStore.instance.get('nxWorkspacePath', '');
 }

@@ -1,0 +1,34 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "files": [],
+  "include": [],
+  "references": [
+    {
+      "path": "../../shared/utils"
+    },
+    {
+      "path": "../../shared/types"
+    },
+    {
+      "path": "../../shared/npm"
+    },
+    {
+      "path": "../telemetry"
+    },
+    {
+      "path": "../tasks"
+    },
+    {
+      "path": "../nx-workspace"
+    },
+    {
+      "path": "../nx-config-decoration"
+    },
+    {
+      "path": "../configuration"
+    },
+    {
+      "path": "./tsconfig.lib.json"
+    }
+  ]
+}

@@ -1,15 +1,21 @@
-import { getShellExecutionForConfig } from '@nx-console/vscode/utils';
+import { getNxWorkspace } from '@nx-console/vscode-nx-workspace';
+import { getOutputChannel } from '@nx-console/vscode-output-channels';
+import { getShellExecutionForConfig } from '@nx-console/vscode-utils';
+import { join } from 'path';
 import { Task, TaskScope } from 'vscode';
 
 export interface NxTaskDefinition {
   positional?: string;
   command: string;
   flags: Array<string>;
+  cwd?: string;
 }
 
 export class NxTask extends Task {
-  static create(definition: NxTaskDefinition, workspacePath: string): NxTask {
-    const { command, flags, positional } = definition;
+  static async create(
+    definition: NxTaskDefinition
+  ): Promise<NxTask | undefined> {
+    const { command, flags, positional, cwd } = definition;
 
     const args: string[] = [
       command,
@@ -17,6 +23,15 @@ export class NxTask extends Task {
       ...flags,
     ];
 
+    const workspace = await getNxWorkspace();
+    if (!workspace) {
+      getOutputChannel().appendLine(
+        'Error while creating task: no workspace found'
+      );
+      return;
+    }
+
+    const { workspacePath, isEncapsulatedNx } = workspace;
     const displayCommand = `nx ${args.join(' ')}`;
     const task = new NxTask(
       { ...definition, type: 'nx' }, // definition
@@ -24,9 +39,11 @@ export class NxTask extends Task {
       displayCommand, // name
       'nx', // source
       // execution
-      getShellExecutionForConfig({
+      await getShellExecutionForConfig({
         displayCommand,
-        cwd: workspacePath,
+        cwd: cwd ? join(workspacePath, cwd) : workspacePath,
+        encapsulatedNx: isEncapsulatedNx,
+        workspacePath,
       })
     );
     return task;

@@ -1,40 +1,57 @@
-import { detectPackageManager } from '@nrwl/devkit';
-import { GlobalConfigurationStore } from '@nx-console/vscode/configuration';
-import { getNxWorkspace } from '@nx-console/vscode/nx-workspace';
+import { GlobalConfigurationStore } from '@nx-console/vscode-configuration';
 import {
-  AbstractTreeProvider,
-  getShellExecutionForConfig,
-  getWorkspacePath,
-} from '@nx-console/vscode/utils';
-import { commands, ExtensionContext, Task, tasks, TaskScope } from 'vscode';
+  onWorkspaceRefreshed,
+  showRefreshLoadingAtLocation,
+} from '@nx-console/vscode-lsp-client';
+import { getNxWorkspace } from '@nx-console/vscode-nx-workspace';
+import { AbstractTreeProvider } from '@nx-console/vscode-utils';
+import { commands, ExtensionContext } from 'vscode';
 import { NxCommandConfig, NxCommandsTreeItem } from './nx-commands-tree-item';
-
-export const EXECUTE_ARBITRARY_COMMAND = 'nxConsole.executeArbitraryCommand';
 
 export class NxCommandsTreeProvider extends AbstractTreeProvider<NxCommandsTreeItem> {
   constructor(private readonly context: ExtensionContext) {
     super();
-    commands.registerCommand(
-      EXECUTE_ARBITRARY_COMMAND,
-      this.executeArbirtraryCommand
-    );
+
     GlobalConfigurationStore.instance.onConfigurationChange(() =>
       this.refresh()
     );
+
+    onWorkspaceRefreshed(() => this.refresh());
+
+    showRefreshLoadingAtLocation({ viewId: 'nxCommands' });
   }
 
   getParent(_: NxCommandsTreeItem) {
     return null;
   }
 
-  async getChildren() {
+  async getChildren(): Promise<NxCommandsTreeItem[]> {
+    const nxCommands = await this.getNxCommands();
+    const targets = await this.getTargets();
+    const defaultCommands = await this.getDefaultCommands();
+
+    return [
+      { type: 'generate' } as const,
+      ...nxCommands,
+      ...targets,
+      ...defaultCommands,
+    ].map((c) => new NxCommandsTreeItem(c, this.context.extensionPath));
+  }
+
+  async getNxCommands(): Promise<NxCommandConfig[]> {
     const commonCommands = GlobalConfigurationStore.instance.get<string[]>(
       'commonNxCommands',
       []
     );
     const vscodeCommands = new Set(await commands.getCommands(true));
-    const availableCommands: NxCommandConfig[] = commonCommands.map(
-      (command) => {
+    const availableCommands: NxCommandConfig[] = commonCommands
+      .filter(
+        (command) =>
+          command !== 'add-dependency' &&
+          command !== 'add-dev-dependency' &&
+          command !== 'generate'
+      )
+      .map((command) => {
         const transformedCommand = `nx.${command.replace(':', '.')}`;
         if (vscodeCommands.has(transformedCommand)) {
           return {
@@ -43,50 +60,46 @@ export class NxCommandsTreeProvider extends AbstractTreeProvider<NxCommandsTreeI
             label: command,
           };
         }
-        if (command === 'add-dependency') {
-          return {
-            type: 'add-dependency',
-            command: 'nxConsole.addDependency',
-            label: 'Add Dependency',
-          };
-        }
-        if (command === 'add-dev-dependency') {
-          return {
-            type: 'add-dev-dependency',
-            command: 'nxConsole.addDevDependency',
-            label: 'Add Dev Dependency',
-          };
-        }
         return {
           command,
           type: 'arbitrary-command',
           label: command,
         };
-      }
-    );
+      });
 
-    return availableCommands.map(
-      (c) => new NxCommandsTreeItem(c, this.context.extensionPath)
-    );
+    return availableCommands;
   }
 
-  async executeArbirtraryCommand(command: string) {
-    const prefixedCommand = command.startsWith('nx ')
-      ? command
-      : `nx ${command}`;
-    const { workspacePath, workspaceType } = await getNxWorkspace();
-    const pkgManager = detectPackageManager(workspacePath);
-
-    const task = new Task(
-      { type: workspaceType },
-      TaskScope.Workspace,
-      prefixedCommand,
-      pkgManager,
-      getShellExecutionForConfig({
-        cwd: workspacePath,
-        displayCommand: prefixedCommand,
-      })
+  async getTargets(): Promise<NxCommandConfig[]> {
+    const workspace = await getNxWorkspace();
+    const targets = Object.values(workspace?.projectGraph.nodes ?? {}).reduce(
+      (acc, project) => {
+        for (const target of Object.keys(project.data.targets ?? {})) {
+          acc.add(target);
+        }
+        return acc;
+      },
+      new Set<string>()
     );
-    tasks.executeTask(task);
+    return Array.from(targets)
+      .sort()
+      .map((target) => ({
+        target,
+        type: 'target',
+      }));
+  }
+
+  async getDefaultCommands(): Promise<NxCommandConfig[]> {
+    return [
+      {
+        type: 'add-dependency',
+      },
+      {
+        type: 'add-dev-dependency',
+      },
+      {
+        type: 'select-workspace',
+      },
+    ];
   }
 }

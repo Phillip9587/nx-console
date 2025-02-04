@@ -1,185 +1,232 @@
+import { lspLogger } from '@nx-console/language-server-utils';
+import { readJsonFile, readNxJson } from '@nx-console/shared-npm';
+import { gte, NxVersion } from '@nx-console/nx-version';
+import { Logger } from '@nx-console/shared-schema';
+import { NxError } from '@nx-console/shared-types';
 import type {
   NxJsonConfiguration,
+  ProjectFileMap,
   ProjectGraph,
-  ProjectsConfigurations,
-} from '@nrwl/devkit';
-import { readAndCacheJsonFile } from '@nx-console/shared/file-system';
-import { nxVersion } from '@nx-console/shared/npm';
-import { Logger } from '@nx-console/shared/schema';
-import { join } from 'path';
+} from 'nx/src/devkit-exports';
+import type { ProjectGraphError } from 'nx/src/project-graph/error-types';
+import type { ConfigurationSourceMaps } from 'nx/src/project-graph/utils/project-configuration-utils';
+import { performance } from 'perf_hooks';
 import {
+  getNxDaemonClient,
+  getNxOutput,
   getNxProjectGraph,
-  getNxWorkspacePackageFileUtils,
+  getNxProjectGraphUtils,
 } from './get-nx-workspace-package';
-import { NxWorkspaceConfiguration } from '@nx-console/shared/types';
-import { lspLogger } from '@nx-console/language-server/utils';
+import { getPackageManagerCommand } from '@nx-console/shared-utils';
+import { execSync } from 'child_process';
 
-let projectGraph: ProjectGraph | null = null;
+let _defaultProcessExit: typeof process.exit;
 
-/**
- * There's a couple things that we need to handle here.
- *
- * 1. We need to check if the installed version of Nx is lower than 12. If that's the case then we need to just read the configurations like we used to do before. We need to do this because when we fallback to the Nx utils that are bundled with the extension, they throw errors when a workspace is lower than 13 :(
- * 2. If there is no version returned, then Nx isn't installed and we need to just use the nx utils to handle pure angular.json
- * 3. Otherwise get the nx utils and get the configuration
- * 4. Catch any errors and return the old way of reading the configuration
- *
- */
 export async function getNxWorkspaceConfig(
   workspacePath: string,
-  format: 'nx' | 'angularCli',
-  isNxWorkspace: boolean,
+  nxVersion: NxVersion,
   logger: Logger
 ): Promise<{
-  workspaceConfiguration: NxWorkspaceConfiguration;
-  configPath: string;
-  daemonEnabled?: boolean;
+  projectGraph: ProjectGraph | undefined;
+  sourceMaps: ConfigurationSourceMaps | undefined;
+  nxJson: NxJsonConfiguration;
+  projectFileMap: ProjectFileMap | undefined;
+  errors?: NxError[];
+  isPartial?: boolean;
 }> {
-  const start = performance.now();
-  logger.log('Retrieving workspace configuration');
-  const version = await nxVersion(workspacePath);
+  let nxJson: NxJsonConfiguration = {};
+  let projectGraph: ProjectGraph = {
+    nodes: {},
+    dependencies: {},
+  };
+  let sourceMaps: ConfigurationSourceMaps | undefined = undefined;
+  let projectFileMap: ProjectFileMap = {};
+  let isPartial = undefined;
 
-  if (version.major < 12) {
+  let errors: NxError[] | undefined;
+
+  const start = performance.now();
+  logger.log(`Retrieving workspace configuration for nx ${nxVersion.full}`);
+
+  if (!gte(nxVersion, '12.0.0')) {
     lspLogger.log('Major version is less than 12');
-    return readWorkspaceConfigs(format, workspacePath);
+    return {
+      projectGraph,
+      sourceMaps,
+      nxJson,
+      projectFileMap,
+      errors,
+      isPartial,
+    };
   }
 
   try {
     // Always set the CI env variable to false
     (process.env as any).CI = false;
-    const [nxWorkspacePackage, nxProjectGraph] = await Promise.all([
-      getNxWorkspacePackageFileUtils(workspacePath, logger),
+    (process.env as any).NX_PROJECT_GLOB_CACHE = false;
+    (process.env as any).NX_WORKSPACE_ROOT_PATH = workspacePath;
+    const [
+      nxProjectGraph,
+      nxOutput,
+      nxProjectGraphUtils,
+      nxDaemonClientModule,
+    ] = await Promise.all([
       getNxProjectGraph(workspacePath, logger),
+      getNxOutput(workspacePath, logger),
+      getNxProjectGraphUtils(workspacePath, logger),
+      getNxDaemonClient(workspacePath, logger),
     ]);
-    const configFile = nxWorkspacePackage.workspaceFileName();
 
-    let workspaceConfiguration: NxWorkspaceConfiguration;
+    // things tend to break if nx.json is broken so let's abort in this case
     try {
-      workspaceConfiguration = nxWorkspacePackage.readWorkspaceConfig({
-        format,
-        path: workspacePath,
+      nxJson = await readNxJson(workspacePath);
+    } catch (e) {
+      const canReadLerna = await canReadLernaJson(workspacePath);
+      if (!canReadLerna) {
+        const newError = new Error(`Unable to read nx.json: ${e.message}`);
+        newError.stack = e.stack;
+        throw newError;
+      }
+    }
+
+    if (
+      nxDaemonClientModule &&
+      nxDaemonClientModule.daemonClient?.enabled() &&
+      !(await nxDaemonClientModule.daemonClient?.isServerAvailable())
+    ) {
+      const pm = await getPackageManagerCommand(workspacePath, logger);
+      execSync(`${pm.exec} nx daemon --start`, {
+        cwd: workspacePath,
+        windowsHide: true,
       });
-    } catch {
-      logger.log('Unable to read workspace config from nx workspace package');
-      workspaceConfiguration = (
-        await readWorkspaceConfigs(format, workspacePath)
-      ).workspaceConfiguration;
     }
 
     try {
-      if (!isNxWorkspace) {
-        throw 'No project graph support';
-      }
-
+      _defaultProcessExit = process.exit;
       process.exit = function (code?: number) {
         console.warn('process.exit called with code', code);
       } as (code?: number) => never;
 
-      if (version.major < 13) {
-        projectGraph = (nxProjectGraph as any).createProjectGraph();
+      if (nxOutput !== undefined) {
+        nxOutput.output.error = (output) => {
+          // do nothing
+        };
+        nxOutput.output.log = (output) => {
+          // do nothing
+        };
+      }
+
+      if (gte(nxVersion, '17.2.0')) {
+        lspLogger.log('createProjectGraphAndSourceMapsAsync');
+        try {
+          const projectGraphAndSourceMaps = await (
+            nxProjectGraph as any
+          ).createProjectGraphAndSourceMapsAsync({
+            exitOnError: false,
+          });
+          projectGraph = projectGraphAndSourceMaps.projectGraph;
+
+          sourceMaps = projectGraphAndSourceMaps.sourceMaps;
+        } catch (e) {
+          if (isProjectGraphError(e)) {
+            lspLogger.log('caught ProjectGraphError, using partial graph');
+            projectGraph = e.getPartialProjectGraph() ?? {
+              nodes: {},
+              dependencies: {},
+            };
+            sourceMaps = e.getPartialSourcemaps();
+            errors = e.getErrors().map((error) => ({
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+              file:
+                (error as any).file ??
+                ((error as any).cause as any)?.errors?.[0]?.location?.file,
+              pluginName: (error as any).pluginName,
+              cause: (error as any).cause,
+            }));
+            isPartial = true;
+          } else {
+            throw e;
+          }
+        }
+        lspLogger.log('createProjectGraphAndSourceMapsAsync successful');
       } else {
         lspLogger.log('createProjectGraphAsync');
         projectGraph = await nxProjectGraph.createProjectGraphAsync({
           exitOnError: false,
-          resetDaemonClient: true,
         });
         lspLogger.log('createProjectGraphAsync successful');
       }
     } catch (e) {
       lspLogger.log('Unable to get project graph');
       lspLogger.log(e.stack);
+      errors = [{ stack: e.stack }];
     }
 
-    workspaceConfiguration = addProjectTargets(
-      workspaceConfiguration,
-      projectGraph
-    );
+    if (gte(nxVersion, '16.3.1') && projectGraph) {
+      projectFileMap =
+        (await nxProjectGraphUtils?.createProjectFileMapUsingProjectGraph(
+          projectGraph
+        )) ?? {};
+    } else {
+      Object.keys(projectGraph?.nodes ?? {}).forEach((projectName) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        projectFileMap[projectName] =
+          (projectGraph?.nodes[projectName].data as any).files ?? [];
+      });
+    }
+
+    // reset the daemon client after getting all required information from the daemon
+    if (nxDaemonClientModule && nxDaemonClientModule.daemonClient?.enabled()) {
+      try {
+        lspLogger.log('Resetting daemon client');
+        nxDaemonClientModule.daemonClient?.reset();
+      } catch (e) {
+        lspLogger.log(`Error while resetting daemon client, moving on...`);
+      }
+    }
 
     const end = performance.now();
     logger.log(`Retrieved workspace configuration in: ${end - start} ms`);
 
+    process.exit = _defaultProcessExit;
+
+    projectGraph.nodes = Object.fromEntries(
+      Object.entries(projectGraph.nodes).sort(([a], [b]) => a.localeCompare(b))
+    );
+
     return {
-      workspaceConfiguration,
-      configPath: join(workspacePath, configFile),
+      projectGraph,
+      sourceMaps,
+      nxJson,
+      projectFileMap,
+      errors,
+      isPartial,
     };
   } catch (e) {
-    return readWorkspaceConfigs(format, workspacePath);
+    lspLogger.log(`Unable to get nx workspace configuration: ${e}`);
+    process.exit = _defaultProcessExit;
+    return {
+      projectGraph,
+      sourceMaps,
+      nxJson,
+      projectFileMap,
+      errors: [{ message: e.message, stack: e.stack }],
+      isPartial,
+    };
   }
 }
 
-async function readWorkspaceConfigs(
-  format: 'nx' | 'angularCli',
-  basedir: string
-) {
-  let workspaceJson: ProjectsConfigurations;
-  if (format === 'nx') {
-    workspaceJson = (await readAndCacheJsonFile('workspace.json', basedir))
-      .json;
-  } else {
-    workspaceJson = (await readAndCacheJsonFile('angular.json', basedir)).json;
-  }
-
-  const nxJson: NxJsonConfiguration = (
-    await readAndCacheJsonFile('nx.json', basedir)
-  ).json;
-  return {
-    workspaceConfiguration: {
-      ...workspaceJson,
-      ...nxJson,
-      projects: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...((nxJson as any).projects ?? {}),
-        ...workspaceJson.projects,
-      },
-    },
-    configPath:
-      format === 'nx'
-        ? join(basedir, 'workspace.json')
-        : join(basedir, 'angular.json'),
-  };
+function isProjectGraphError(e: any): e is ProjectGraphError {
+  return e.name === 'ProjectGraphError';
 }
 
-function addProjectTargets(
-  workspaceConfiguration: NxWorkspaceConfiguration,
-  projectGraph: ProjectGraph | null
-) {
-  if (!projectGraph) {
-    return workspaceConfiguration;
+async function canReadLernaJson(workspacePath: string): Promise<boolean> {
+  try {
+    await readJsonFile('lerna.json', workspacePath);
+    return true;
+  } catch (e) {
+    return false;
   }
-
-  // We always want to get the latest projects from the graph, rather than the ones in the workspace configuration
-  const modifiedWorkspaceConfiguration: NxWorkspaceConfiguration = {
-    ...workspaceConfiguration,
-    projects: {},
-  };
-
-  for (const [projectName, node] of Object.entries(projectGraph.nodes)) {
-    const workspaceProject = workspaceConfiguration.projects[projectName];
-
-    if (!workspaceProject) {
-      // Certain versions of Nx will include npm, (or other third party dependencies) in the project graph nodes.
-      // These usually start with `npm:depname`
-      // We dont want to include them.
-      if (projectName.match(/:/)) {
-        continue;
-      }
-
-      modifiedWorkspaceConfiguration.projects[projectName] = {
-        root: node.data.root,
-        targets: node.data.targets ?? {},
-        name: projectName,
-        tags: node.data.tags ?? [],
-        files: node.data.files ?? [],
-      };
-    } else {
-      modifiedWorkspaceConfiguration.projects[projectName] = {
-        ...workspaceProject,
-        targets: node.data.targets ?? {},
-        files: node.data.files ?? [],
-        name: projectName,
-      };
-    }
-  }
-
-  return modifiedWorkspaceConfiguration;
 }

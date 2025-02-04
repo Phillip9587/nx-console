@@ -1,12 +1,12 @@
 {
   "root": true,
   "ignorePatterns": ["**/*"],
-  "plugins": ["@nrwl/nx"],
+  "plugins": ["@nx"],
   "overrides": [
     {
       "files": ["*.ts", "*.tsx", "*.js", "*.jsx"],
       "rules": {
-        "@nrwl/nx/enforce-module-boundaries": [
+        "@nx/enforce-module-boundaries": [
           "error",
           {
             "enforceBuildableLibDependency": true,
@@ -27,33 +27,48 @@
                 "bannedExternalImports": ["vscode"]
               },
               {
-                "sourceTag": "type:vscode-ui",
-                "onlyDependOnLibsWithTags": ["type:shared", "type:vscode-ui"]
+                "sourceTag": "type:generate-ui",
+                "onlyDependOnLibsWithTags": ["type:shared", "type:generate-ui"]
               }
             ]
           }
         ],
-        "@typescript-eslint/no-unused-vars": [
-          "warn",
+        "no-restricted-imports": [
+          "error",
           {
-            "argsIgnorePattern": "^_$"
+            "name": "@nx/devkit",
+            "message": "Please use nx/src/devkit-exports instead, or import function directly from @nx/devkit/src/*"
           }
         ]
       }
     },
     {
       "files": ["*.ts", "*.tsx"],
-      "extends": ["plugin:@nrwl/nx/typescript"],
-      "rules": {}
+      "extends": ["plugin:@nx/typescript"],
+      "rules": {
+        "@typescript-eslint/no-unused-vars": [
+          "warn",
+          {
+            "argsIgnorePattern": "^_$"
+          }
+        ],
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-extra-semi": "error",
+        "no-extra-semi": "off"
+      }
     },
     {
       "files": ["*.js", "*.jsx"],
-      "extends": ["plugin:@nrwl/nx/javascript"],
-      "rules": {}
+      "extends": ["plugin:@nx/javascript"],
+      "rules": {
+        "@typescript-eslint/no-extra-semi": "error",
+        "no-extra-semi": "off"
+      }
     },
     {
       "files": ["*.html"],
       "rules": {}
     }
-  ]
+  ],
+  "extends": []
 }

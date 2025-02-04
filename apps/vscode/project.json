@@ -1,26 +1,27 @@
 {
+  "name": "vscode",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/vscode/src",
   "projectType": "application",
   "prefix": "vscode",
   "generators": {},
-  "implicitDependencies": ["vscode-ui", "nxls"],
+  "implicitDependencies": [
+    "generate-ui-v2",
+    "nxls",
+    "nx-cloud-onboarding-webview"
+  ],
   "targets": {
     "watch-all": {
       "executor": "nx:run-commands",
       "options": {
         "commands": [
           {
-            "command": "yarn nx watch vscode",
+            "command": "yarn nx run vscode:watch",
             "prefix": "vscode",
             "color": "blue"
           },
           {
-            "command": "yarn nx watch vscode-ui",
-            "prefix": "vscode-ui",
-            "color": "green"
-          },
-          {
-            "command": "yarn nx watch nxls",
+            "command": "yarn nx run nxls:watch",
             "prefix": "lsp",
             "color": "magenta"
           }
@@ -29,115 +30,189 @@
       }
     },
     "watch": {
-      "executor": "@nrwl/node:webpack",
+      "executor": "@nx/esbuild:esbuild",
       "options": {
-        "externalDependencies": [
+        "watch": true,
+        "external": [
           "vscode",
           "typescript",
           "@swc/core",
-          "fsevents"
+          "fsevents",
+          "ts-node",
+          "pnpapi",
+          "@angular-devkit/*",
+          "nx"
         ],
-        "webpackConfig": "apps/vscode/webpack.config.js",
+        "bundle": true,
+        "thirdParty": true,
+        "sourcemap": true,
         "outputPath": "dist/apps/vscode",
+        "skipTypeCheck": false,
+        "outputFileName": "main.js",
+        "format": ["cjs"],
         "main": "apps/vscode/src/main.ts",
         "tsConfig": "apps/vscode/tsconfig.app.json",
         "assets": [
-          "apps/vscode/src/package.json",
-          "apps/vscode/src/nx-schema.json",
-          "apps/vscode/src/tree-view-icon.svg",
-          "apps/vscode/src/assets",
-          "apps/vscode/src/getting-started"
+          {
+            "glob": "nx-schema.json",
+            "input": "apps/vscode/src",
+            "output": "/"
+          },
+          {
+            "glob": "tree-view-icon.svg",
+            "input": "apps/vscode/src",
+            "output": "/"
+          },
+          {
+            "glob": "**/*",
+            "input": "apps/vscode/src/assets",
+            "output": "/assets"
+          },
+          {
+            "glob": "**/*",
+            "input": "apps/vscode/src/getting-started",
+            "output": "/getting-started"
+          }
         ],
-        "watch": true
+        "deleteOutputPath": false,
+        "generatePackageJson": false,
+        "platform": "node",
+        "esbuildOptions": {
+          "mainFields": ["module", "main"],
+          "sourcemap": "both",
+          "outExtension": {
+            ".js": ".js"
+          },
+          "loader": {
+            ".node": "dataurl"
+          },
+          "logLevel": "error"
+        }
       }
     },
     "build": {
-      "executor": "@nrwl/webpack:webpack",
-      "defaultConfiguration": "production",
+      "executor": "@nx/esbuild:esbuild",
       "options": {
-        "externalDependencies": [
+        "external": [
           "vscode",
-          "typescript",
           "@swc/core",
-          "fsevents"
+          "fsevents",
+          "ts-node",
+          "pnpapi",
+          "webpack",
+          "@angular-devkit/*",
+          "@nx/nx*",
+          "nx"
         ],
-        "webpackConfig": "apps/vscode/webpack.config.js",
+        "thirdParty": true,
+        "minify": true,
+        "sourcemap": false,
         "outputPath": "dist/apps/vscode",
+        "outputFileName": "main.js",
+        "format": ["cjs"],
         "main": "apps/vscode/src/main.ts",
         "tsConfig": "apps/vscode/tsconfig.app.json",
         "assets": [
-          "apps/vscode/src/package.json",
-          "apps/vscode/src/nx-schema.json",
-          "apps/vscode/src/tree-view-icon.svg",
-          "apps/vscode/src/assets",
-          "apps/vscode/src/getting-started",
           {
-            "glob": "README.md",
-            "input": "./",
+            "glob": "nx-schema.json",
+            "input": "apps/vscode/src",
             "output": "/"
           },
           {
-            "glob": "CHANGELOG.md",
-            "input": "./",
+            "glob": "tree-view-icon.svg",
+            "input": "apps/vscode/src",
             "output": "/"
+          },
+          {
+            "glob": "**/*",
+            "input": "apps/vscode/src/assets",
+            "output": "/assets"
+          },
+          {
+            "glob": "**/*",
+            "input": "apps/vscode/src/getting-started",
+            "output": "/getting-started"
           },
           {
             "glob": "LICENSE",
-            "input": "./",
+            "input": "",
+            "output": "/"
+          },
+          {
+            "glob": "README.md",
+            "input": "apps/vscode",
             "output": "/"
           }
         ],
-        "buildLibsFromSource": true,
         "deleteOutputPath": false,
-        "target": "node",
-        "compiler": "tsc"
+        "platform": "node",
+        "esbuildOptions": {
+          "mainFields": ["module", "main"],
+          "outExtension": {
+            ".js": ".js"
+          },
+          "treeShaking": true,
+          "loader": {
+            ".node": "dataurl"
+          },
+          "logLevel": "error"
+        }
       },
       "configurations": {
         "ci": {
           "optimization": false
         },
         "production": {
-          "sourceMap": false,
-          "optimization": true,
-          "extractLicenses": true,
-          "externalDependencies": [
-            "vscode",
-            "jsonc-parser",
-            "@monodon/typescript-nx-imports-plugin",
-            "@yarnpkg/fslib",
-            "@yarnpkg/libzip",
-            "@swc/core",
-            "ts-node",
-            "fsevents"
-          ],
-          "fileReplacements": [
-            {
-              "replace": "apps/vscode/src/environments/environment.ts",
-              "with": "apps/vscode/src/environments/environment.prod.ts"
-            }
-          ],
-          "webpackConfig": "apps/vscode/webpack.prod.config.js"
+          "skipTypeCheck": true,
+          "minify": true,
+          "sourcemap": false
+        },
+        "debug": {
+          "minify": false,
+          "sourcemap": true
         }
       },
-      "outputs": ["{options.outputPath}"]
+      "dependsOn": [
+        "^build",
+        "^build-webview-files",
+        "extract-dependencies",
+        {
+          "projects": "nxls",
+          "target": "build",
+          "params": "forward"
+        }
+      ],
+      "outputs": ["{options.outputPath}"],
+      "defaultConfiguration": "production"
     },
-    "lint": {
-      "executor": "@nrwl/linter:eslint",
+    "extract-dependencies": {
+      "executor": "nx:run-commands",
       "options": {
-        "lintFilePatterns": ["apps/vscode/**/*.ts"]
-      }
+        "command": "node ./tools/scripts/copy-to-vscode.js"
+      },
+      "inputs": [
+        {
+          "dependentTasksOutputFiles": "**/*",
+          "transitive": true
+        }
+      ],
+      "dependsOn": ["^build"]
     },
     "package": {
       "executor": "nx:run-commands",
       "dependsOn": ["build", "^build"],
       "options": {
-        "commands": [
-          "node ./tools/scripts/vscode-yarn.js",
-          "node ./tools/scripts/vscode-vsce.js"
-        ],
+        "commands": ["node ./tools/scripts/vscode-vsce.js"],
         "parallel": false
       },
-      "outputs": ["dist/apps/vscode"]
+      "outputs": ["{workspaceRoot}/dist/apps/vscode"]
+    },
+    "semantic-release": {
+      "executor": "@theunderscorer/nx-semantic-release:semantic-release",
+      "options": {
+        "packageJsonDir": "apps/vscode",
+        "commitMessage": "chore(release-${PROJECT_NAME}): ${nextRelease.version}"
+      }
     }
   },
   "tags": ["type:vscode"]

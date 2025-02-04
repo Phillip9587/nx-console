@@ -1,22 +1,23 @@
 import {
-  Targets,
-  Option,
   DefaultValue,
+  Option,
   TargetConfiguration,
-  WorkspaceProjects,
-} from '@nx-console/shared/schema';
+  Targets,
+} from '@nx-console/shared-schema';
+import type {
+  TargetConfiguration as NxTargetConfiguration,
+  ProjectGraphProjectNode,
+} from 'nx/src/devkit-exports';
 import * as path from 'path';
-import { TargetConfiguration as NxTargetConfiguration } from '@nrwl/devkit';
 
-import { getTelemetry } from './telemetry';
-import { getOutputChannel } from './output-channel';
+import { readAndCacheJsonFile } from '@nx-console/shared-file-system';
 import {
   localDependencyPath,
   workspaceDependencyPath,
-} from '@nx-console/shared/npm';
-import { readAndCacheJsonFile } from '@nx-console/shared/file-system';
-import { normalizeSchema } from '@nx-console/shared/schema/normalize';
-import { getPrimitiveValue } from '@nx-console/shared/utils';
+} from '@nx-console/shared-npm';
+import { normalizeSchema } from '@nx-console/shared-schema';
+import { getPrimitiveValue } from '@nx-console/shared-utils';
+import { getOutputChannel } from '@nx-console/vscode-output-channels';
 
 export function readTargetDef(
   targetName: string,
@@ -60,8 +61,7 @@ function readDefaultValues(configurations: any, name: string): DefaultValue[] {
 export async function readBuilderSchema(
   basedir: string,
   builder: string,
-  workspaceType: 'ng' | 'nx',
-  projects: WorkspaceProjects,
+  projects: Record<string, ProjectGraphProjectNode>,
   projectDefaults?: { [name: string]: string }
 ): Promise<Option[] | undefined> {
   try {
@@ -95,15 +95,10 @@ export async function readBuilderSchema(
       path.dirname(buildersJson.path)
     );
 
-    return await normalizeSchema(
-      builderSchema.json,
-      workspaceType,
-      projectDefaults
-    );
+    return await normalizeSchema(builderSchema.json, projectDefaults);
   } catch (e) {
     // todo: make this a utility function to be used in more places.
     const stringifiedError = e.toString ? e.toString() : JSON.stringify(e);
     getOutputChannel().appendLine(stringifiedError);
-    getTelemetry().exception(stringifiedError);
   }
 }

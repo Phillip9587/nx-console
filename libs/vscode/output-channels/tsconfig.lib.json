@@ -1,0 +1,19 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "out-tsc/vscode-output-channels",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "jest.config.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "out-tsc"
+  ],
+  "references": [
+    {
+      "path": "../../shared/schema/tsconfig.lib.json"
+    }
+  ]
+}

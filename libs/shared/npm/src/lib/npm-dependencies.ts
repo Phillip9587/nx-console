@@ -1,5 +1,5 @@
-import { stat, readdir } from 'fs/promises';
 import { join } from 'path';
+import { directoryExists, readDirectory } from '@nx-console/shared-file-system';
 
 /**
  * Get a flat list of all node_modules folders in the workspace.
@@ -9,31 +9,45 @@ import { join } from 'path';
  * @returns
  */
 export async function npmDependencies(workspacePath: string) {
-  const nodeModulesDir = join(workspacePath, 'node_modules');
+  const nodeModules = join(workspacePath, 'node_modules');
+  const nodeModulesEncapsulated = join(
+    workspacePath,
+    '.nx',
+    'installation',
+    'node_modules'
+  );
+
+  let nodeModulesDir = nodeModules;
+
   const res: string[] = [];
-  const stats = await stat(nodeModulesDir);
-  if (!stats.isDirectory()) {
-    return res;
+
+  if (!(await directoryExists(nodeModules))) {
+    if (!(await directoryExists(nodeModulesEncapsulated))) {
+      return res;
+    } else {
+      nodeModulesDir = nodeModulesEncapsulated;
+    }
   }
 
-  const dirContents = await readdir(nodeModulesDir);
+  const dirContents = await readDirectory(nodeModulesDir);
 
   for (const npmPackageOrScope of dirContents) {
     if (npmPackageOrScope.startsWith('.')) {
       continue;
     }
 
-    const packageStats = await stat(join(nodeModulesDir, npmPackageOrScope));
-    if (!packageStats.isDirectory()) {
+    if (!(await directoryExists(join(nodeModulesDir, npmPackageOrScope)))) {
       continue;
     }
 
     if (npmPackageOrScope.startsWith('@')) {
-      (await readdir(join(nodeModulesDir, npmPackageOrScope))).forEach((p) => {
-        res.push(`${nodeModulesDir}/${npmPackageOrScope}/${p}`);
-      });
+      (await readDirectory(join(nodeModulesDir, npmPackageOrScope))).forEach(
+        (p) => {
+          res.push(join(nodeModulesDir, npmPackageOrScope, p));
+        }
+      );
     } else {
-      res.push(`${nodeModulesDir}/${npmPackageOrScope}`);
+      res.push(join(nodeModulesDir, npmPackageOrScope));
     }
   }
 

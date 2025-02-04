@@ -1,0 +1,19 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "files": [],
+  "include": [],
+  "references": [
+    {
+      "path": "../lsp-client"
+    },
+    {
+      "path": "../nx-workspace"
+    },
+    {
+      "path": "../output-channels"
+    },
+    {
+      "path": "./tsconfig.lib.json"
+    }
+  ]
+}

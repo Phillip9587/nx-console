@@ -1,19 +1,10 @@
+import { WORKSPACE_GENERATOR_NAME_REGEX } from '@nx-console/shared-schema';
 import {
-  WorkspaceProjects,
-  WORKSPACE_GENERATOR_NAME_REGEX,
-} from '@nx-console/shared/schema';
-import { NxProjectsConfiguration } from '@nx-console/shared/types';
-import { WorkspaceConfigurationStore } from '@nx-console/vscode/configuration';
-import { NxConversion } from '@nx-console/vscode/nx-conversion';
-import { getNxWorkspace } from '@nx-console/vscode/nx-workspace';
-import { getTelemetry } from '@nx-console/vscode/utils';
-import {
-  ProviderResult,
-  Task,
-  TaskExecution,
-  TaskProvider,
-  tasks,
-} from 'vscode';
+  getNxWorkspace,
+  getNxWorkspacePathFromNxls,
+} from '@nx-console/vscode-nx-workspace';
+import { logAndShowTaskCreationError } from '@nx-console/vscode-output-channels';
+import { Task, TaskExecution, TaskProvider, tasks } from 'vscode';
 import { CliTask } from './cli-task';
 import { CliTaskDefinition } from './cli-task-definition';
 import { NxTask } from './nx-task';
@@ -21,6 +12,14 @@ import { NxTask } from './nx-task';
 export class CliTaskProvider implements TaskProvider {
   private currentDryRun?: TaskExecution;
   private deferredDryRun?: CliTaskDefinition;
+
+  private static _instance: CliTaskProvider;
+  static get instance(): CliTaskProvider {
+    if (!this._instance) {
+      this._instance = new CliTaskProvider();
+    }
+    return this._instance;
+  }
 
   constructor() {
     tasks.onDidEndTaskProcess(() => {
@@ -32,47 +31,47 @@ export class CliTaskProvider implements TaskProvider {
     });
   }
 
-  getWorkspacePath() {
-    return WorkspaceConfigurationStore.instance.get('nxWorkspacePath', '');
-  }
+  async provideTasks(): Promise<Task[]> {
+    const nxWorkspace = await getNxWorkspace();
 
-  /**
-   *
-   * @deprecated
-   */
-  getWorkspaceJsonPath() {
-    return WorkspaceConfigurationStore.instance.get('nxWorkspacePath', '');
-  }
+    const projectTargetCombinations: [string, string][] = [];
 
-  provideTasks(): ProviderResult<Task[]> {
-    return null;
+    Object.entries(nxWorkspace?.projectGraph.nodes ?? {}).forEach(
+      ([projectName, project]) => {
+        Object.keys(project.data.targets ?? {}).forEach((targetName) => {
+          projectTargetCombinations.push([projectName, targetName]);
+        });
+      }
+    );
+
+    return CliTask.batchCreate(
+      projectTargetCombinations.map(([projectName, targetName]) => {
+        return {
+          command: 'run',
+          positional: `${projectName}:${targetName}`,
+          flags: [],
+        };
+      }),
+      nxWorkspace
+    );
   }
 
   async resolveTask(task: Task): Promise<Task | undefined> {
-    if (
-      this.getWorkspacePath() &&
-      task.definition.command &&
-      task.definition.project
-    ) {
-      const cliTask = await this.createTask({
+    if ((await getNxWorkspacePathFromNxls()) && task.definition.command) {
+      const cliTask = await CliTask.create({
         command: task.definition.command,
-        positional: task.definition.project,
+        positional: task.definition.positional,
         flags: Array.isArray(task.definition.flags)
           ? task.definition.flags
           : [],
       });
       // resolveTask requires that the same definition object be used.
-      cliTask.definition = task.definition;
+      cliTask!.definition = task.definition;
       return cliTask;
     }
   }
 
-  async createTask(definition: CliTaskDefinition) {
-    return CliTask.create(definition, this.getWorkspacePath());
-  }
-
   async executeTask(definition: CliTaskDefinition) {
-    NxConversion.instance.trackEvent(definition.command);
     const isDryRun = definition.flags.includes('--dry-run');
     if (isDryRun && this.currentDryRun) {
       this.deferredDryRun = definition;
@@ -80,56 +79,36 @@ export class CliTaskProvider implements TaskProvider {
     }
 
     let task;
-    const positionals = definition.positional.match(
+    const positionals = definition.positional?.match(
       WORKSPACE_GENERATOR_NAME_REGEX
     );
-    if (
-      definition.command === 'generate' &&
-      positionals &&
-      positionals.length > 2
-    ) {
-      task = NxTask.create(
-        {
+    try {
+      if (
+        definition.command === 'generate' &&
+        positionals &&
+        positionals.length > 2
+      ) {
+        task = await NxTask.create({
           command: `workspace-${positionals[1]}`,
           positional: positionals[2],
           flags: definition.flags,
-        },
-        this.getWorkspacePath()
-      );
-    } else {
-      task = await this.createTask(definition);
+          cwd: definition.cwd,
+        });
+      } else {
+        task = await CliTask.create(definition);
+      }
+    } catch (e) {
+      logAndShowTaskCreationError(e);
+      return;
     }
 
-    const telemetry = getTelemetry();
-    telemetry.featureUsed(definition.command);
-
+    if (!task) {
+      return;
+    }
     return tasks.executeTask(task).then((execution) => {
       if (isDryRun) {
         this.currentDryRun = execution;
       }
     });
-  }
-
-  async getProjects(
-    json?: NxProjectsConfiguration
-  ): Promise<WorkspaceProjects> {
-    if (json) {
-      return json.projects;
-    } else {
-      const result = await getNxWorkspace();
-      if (!result.validWorkspaceJson || !result.workspace) {
-        return {};
-      } else {
-        return result.workspace.projects;
-      }
-    }
-  }
-
-  async getProjectNames(): Promise<string[]> {
-    return Object.keys((await this.getProjects()) || {});
-  }
-
-  async getProjectEntries(json?: NxProjectsConfiguration) {
-    return Object.entries((await this.getProjects(json)) || {});
   }
 }

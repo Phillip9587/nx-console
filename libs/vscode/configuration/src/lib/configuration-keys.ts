@@ -1,27 +1,37 @@
 export const GLOBAL_CONFIG_KEYS = [
-  'enableTelemetry',
   'commonNxCommands',
   'enableGenerateFromContextMenu',
-  'enableWorkspaceConfigCodeLens',
+  'enableCodeLens',
   'enableLibraryImports',
   'enableGeneratorFilters',
   'generatorAllowlist',
   'generatorBlocklist',
   'enableTaskExecutionDryRunOnChange',
   'projectViewingStyle',
+  'moveGeneratorPatterns',
+  'useNewGenerateUiPreview',
+  'showProjectDetailsView',
+  'showNodeVersionOnStartup',
+  'nxWorkspacePath',
+  'nxCloudNotifications',
 ] as const;
 
 export type GlobalConfig = {
-  enableTelemetry: boolean;
   commonNxCommands: string[];
   enableGenerateFromContextMenu: boolean;
-  enableWorkspaceConfigCodeLens: boolean;
+  enableCodeLens: boolean;
   enableLibraryImports: boolean;
   enableGeneratorFilters: boolean;
   generatorAllowlist: string[];
   generatorBlocklist: string[];
   enableTaskExecutionDryRunOnChange: boolean;
-  projectViewingStyle: 'list' | 'tree';
+  projectViewingStyle: 'list' | 'tree' | 'automatic';
+  moveGeneratorPatterns: Record<string, string>;
+  useNewGenerateUiPreview: boolean;
+  showProjectDetailsView: boolean;
+  showNodeVersionOnStartup: boolean;
+  nxWorkspacePath: string;
+  nxCloudNotifications: 'all' | 'errors' | 'none';
 };
 
 /**
@@ -31,10 +41,7 @@ export type GlobalConfigKeys = typeof GLOBAL_CONFIG_KEYS[number];
 
 export const WORKSPACE_CONFIG_KEYS = [
   'nxWorkspacePath',
-  'nxConversionCount',
-  'nxConversionDoNotAskAgain',
-  'workspaceType',
-  'nxVersion',
+  'nxConversionDate',
   'projectsViewCollapsibleState',
 ] as const;
 /**

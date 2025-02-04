@@ -1,11 +1,8 @@
-import {
-  checkIsNxWorkspace,
-  formatError,
-  toWorkspaceFormat,
-} from '@nx-console/shared/utils';
+import { formatError } from '@nx-console/shared-utils';
 
-import { clearJsonCache, fileExists } from '@nx-console/shared/file-system';
-import { Logger } from '@nx-console/shared/schema';
+import { clearJsonCache, fileExists } from '@nx-console/shared-file-system';
+import { Logger } from '@nx-console/shared-schema';
+import { NxWorkspace } from '@nx-console/shared-types';
 import { join } from 'path';
 import {
   firstValueFrom,
@@ -16,8 +13,9 @@ import {
   switchMap,
   tap,
 } from 'rxjs';
+import { getNxVersion } from './get-nx-version';
 import { getNxWorkspaceConfig } from './get-nx-workspace-config';
-import { NxWorkspace } from '@nx-console/shared/types';
+import { lspLogger } from '@nx-console/language-server-utils';
 
 const enum Status {
   not_started,
@@ -31,19 +29,14 @@ let status: Status = Status.not_started;
 function resetStatus(workspacePath: string) {
   status = Status.not_started;
   cachedReplay = new ReplaySubject<NxWorkspace>();
-  // Clear out the workspace config path, needed for angular or older nx workspaces
-  clearJsonCache('angular.json', workspacePath);
+  // Clear out the workspace config path, needed for older nx workspaces
   clearJsonCache('workspace.json', workspacePath);
   clearJsonCache('nx.json', workspacePath);
 }
 
 export async function nxWorkspace(
   workspacePath: string,
-  logger: Logger = {
-    log(message) {
-      console.log(message);
-    },
-  },
+
   reset?: boolean
 ): Promise<NxWorkspace> {
   if (reset) {
@@ -57,7 +50,7 @@ export async function nxWorkspace(
         tap(() => {
           status = Status.in_progress;
         }),
-        switchMap(() => from(_workspace(workspacePath, logger))),
+        switchMap(() => from(_workspace(workspacePath, lspLogger))),
         tap((workspace) => {
           cachedReplay.next(workspace);
           status = Status.cached;
@@ -72,37 +65,37 @@ async function _workspace(
   workspacePath: string,
   logger: Logger
 ): Promise<NxWorkspace> {
-  const isAngularWorkspace = await fileExists(
-    join(workspacePath, 'angular.json')
-  );
-  const isNxWorkspace = await checkIsNxWorkspace(workspacePath);
-
   try {
-    const config = await getNxWorkspaceConfig(
-      workspacePath,
-      isAngularWorkspace ? 'angularCli' : 'nx',
-      isNxWorkspace,
-      logger
-    );
+    const nxVersion = await getNxVersion(workspacePath);
+    const {
+      projectGraph,
+      sourceMaps,
+      nxJson,
+      projectFileMap,
+      errors,
+      isPartial,
+    } = await getNxWorkspaceConfig(workspacePath, nxVersion, logger);
 
     const isLerna = await fileExists(join(workspacePath, 'lerna.json'));
+
     return {
-      validWorkspaceJson: true,
-      workspaceType: isAngularWorkspace ? 'ng' : 'nx',
-      workspace: toWorkspaceFormat(config.workspaceConfiguration),
-      configurationFilePath: config.configPath,
-      daemonEnabled: config.daemonEnabled,
-      isLerna,
-      workspaceLayout: {
-        appsDir:
-          config.workspaceConfiguration.workspaceLayout?.appsDir ?? isLerna
-            ? 'packages'
-            : 'apps',
-        libsDir:
-          config.workspaceConfiguration.workspaceLayout?.libsDir ?? isLerna
-            ? 'packages'
-            : 'libs',
+      projectGraph: projectGraph ?? {
+        nodes: {},
+        dependencies: {},
       },
+      sourceMaps,
+      nxJson,
+      projectFileMap,
+      validWorkspaceJson: true,
+      isPartial: isPartial,
+      isLerna,
+      isEncapsulatedNx: !!nxJson?.installation,
+      workspaceLayout: {
+        appsDir: nxJson.workspaceLayout?.appsDir,
+        libsDir: nxJson.workspaceLayout?.libsDir,
+      },
+      errors,
+      nxVersion,
       workspacePath,
     };
   } catch (e) {
@@ -111,14 +104,20 @@ async function _workspace(
     // Default to nx workspace
     return {
       validWorkspaceJson: false,
-      workspaceType: 'nx',
-      workspace: {
-        npmScope: '@nx-console',
-        projects: {},
-        version: 2,
+      projectGraph: {
+        nodes: {},
+        dependencies: {},
       },
-      configurationFilePath: '',
+      sourceMaps: undefined,
+      projectFileMap: undefined,
+      nxJson: {},
       workspacePath,
+      isEncapsulatedNx: false,
+      nxVersion: {
+        major: 0,
+        minor: 0,
+        full: '0.0.0',
+      },
       isLerna: false,
       workspaceLayout: {
         appsDir: 'apps',

@@ -1,4 +1,4 @@
-import { nxWorkspace } from '@nx-console/language-server/workspace';
+import { nxWorkspace } from '@nx-console/language-server-workspace';
 import {
   ASTNode,
   CompletionItem,
@@ -19,9 +19,9 @@ export async function inputNameCompletion(
 
   const inputNameCompletion: CompletionItem[] = [];
 
-  const { workspace } = await nxWorkspace(workingPath);
+  const { nxJson } = await nxWorkspace(workingPath);
 
-  for (const inputName of Object.keys(workspace.namedInputs ?? {})) {
+  for (const inputName of Object.keys(nxJson.namedInputs ?? {})) {
     if (hasDependencyHat) {
       inputNameCompletion.push(
         createCompletionItem(

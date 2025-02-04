@@ -1,9 +1,12 @@
-import { configureJsonLanguageService } from '@nx-console/language-server/utils';
+import {
+  configureJsonLanguageService,
+  getLanguageModelCache,
+} from '@nx-console/language-server-utils';
 import {
   CompletionType,
   EnhancedJsonSchema,
-} from '@nx-console/shared/json-schema';
-import * as workspace from '@nx-console/language-server/workspace';
+} from '@nx-console/shared-json-schema';
+import type * as workspace from '@nx-console/language-server-workspace';
 import { vol } from 'memfs';
 import {
   ClientCapabilities,
@@ -11,57 +14,71 @@ import {
   TextDocument,
 } from 'vscode-json-languageservice';
 import { getCompletionItems } from './get-completion-items';
-import { NxWorkspace } from '@nx-console/shared/types';
+import { NxWorkspace } from '@nx-console/shared-types';
+import { normalize } from 'path';
 
 jest.mock(
-  '@nx-console/language-server/workspace',
+  '@nx-console/language-server-workspace',
   (): Partial<typeof workspace> => ({
     nxWorkspace: jest.fn(() =>
       Promise.resolve<NxWorkspace>({
-        configurationFilePath: '/workspace.json',
         isLerna: false,
+        isEncapsulatedNx: false,
         validWorkspaceJson: true,
-        workspaceType: 'nx',
         workspacePath: '/',
         workspaceLayout: {
           appsDir: '',
           libsDir: '',
         },
-        workspace: {
-          version: 2,
-          projects: {
+        nxVersion: {
+          major: 0,
+          minor: 0,
+          full: '0.0.0',
+        },
+        projectGraph: {
+          nodes: {
             project1: {
-              root: 'apps/project1',
-              tags: ['tag1'],
-              targets: {
-                build: {
-                  executor: 'noop',
-                },
-                test: {
-                  executor: 'noop',
+              name: 'project1',
+              type: 'app',
+              data: {
+                root: 'apps/project1',
+                tags: ['tag1'],
+                targets: {
+                  build: {
+                    executor: 'noop',
+                  },
+                  test: {
+                    executor: 'noop',
+                  },
                 },
               },
             },
             project2: {
-              root: 'apps/project2',
-              tags: ['tag2', 'tag3'],
-              targets: {
-                build: {
-                  executor: 'noop',
-                  configurations: {
-                    production: {},
+              name: 'project2',
+              type: 'app',
+              data: {
+                root: 'apps/project2',
+                tags: ['tag2', 'tag3'],
+                targets: {
+                  build: {
+                    executor: 'noop',
+                    configurations: {
+                      production: {},
+                    },
                   },
-                },
-                test: {
-                  executor: 'noop',
-                },
-                lint: {
-                  executor: 'noop',
+                  test: {
+                    executor: 'noop',
+                  },
+                  lint: {
+                    executor: 'noop',
+                  },
                 },
               },
             },
           },
+          dependencies: {},
         },
+        nxJson: {},
       })
     ),
   })
@@ -100,6 +117,11 @@ describe('getCompletionItems', () => {
 
     const items = await getCompletionItems(
       '/workspace',
+      {
+        major: 15,
+        minor: 0,
+        full: '15.0.0',
+      },
       jsonAst,
       document,
       matchingSchemas,
@@ -126,6 +148,7 @@ describe('getCompletionItems', () => {
 
   afterAll(() => {
     vol.reset();
+    getLanguageModelCache().dispose();
   });
 
   it('should return all completion items without a glob', async () => {
@@ -142,20 +165,20 @@ describe('getCompletionItems', () => {
       }
     );
 
-    expect(labels).toMatchInlineSnapshot(`
-          Array [
-            "\\"file.js\\"",
-            "\\"project/src/main.js\\"",
-            "\\"project/src/main.ts\\"",
-          ]
-      `);
-    expect(details).toMatchInlineSnapshot(`
-          Array [
-            "/workspace/file.js",
-            "/workspace/project/src/main.js",
-            "/workspace/project/src/main.ts",
-          ]
-      `);
+    expect(labels.map((l) => normalize(l)).sort()).toEqual(
+      [`"file.js"`, `"project/src/main.js"`, `"project/src/main.ts"`]
+        .map((l) => normalize(l))
+        .sort()
+    );
+    expect(details.map((l) => normalize(l ?? '')).sort()).toEqual(
+      [
+        '/workspace/file.js',
+        '/workspace/project/src/main.js',
+        '/workspace/project/src/main.ts',
+      ]
+        .map((l) => normalize(l))
+        .sort()
+    );
   });
 
   it('should be able to use a glob', async () => {
@@ -304,23 +327,27 @@ describe('getCompletionItems', () => {
     });
   });
 
-  describe('project with targets', () => {
+  describe('targets', () => {
     const projectWithTargetsSchema = {
       type: 'object',
       properties: {
-        targets: {
+        projectTargets: {
           type: 'array',
           items: {
             type: 'string',
             'x-completion-type': CompletionType.projectTarget,
           },
         },
+        targets: {
+          type: 'string',
+          'x-completion-type': CompletionType.projects,
+        },
       },
     };
 
     it('should return targets', async () => {
       const { labels } = await getTestCompletionItemsFor(
-        `{"targets": ["|"]}`,
+        `{"projectTargets": ["|"]}`,
         projectWithTargetsSchema
       );
       expect(labels).toMatchInlineSnapshot(`
@@ -331,6 +358,21 @@ describe('getCompletionItems', () => {
           "\\"project2:build:production\\"",
           "\\"project2:test\\"",
           "\\"project2:lint\\"",
+        ]
+      `);
+    });
+
+    it('should return completion-type results before trying default implementations', async () => {
+      const { labels } = await getTestCompletionItemsFor(
+        `{"targets": "|"}`,
+        projectWithTargetsSchema
+      );
+      expect(labels).toMatchInlineSnapshot(`
+        Array [
+          "\\"project1\\"",
+          "\\"!project1\\"",
+          "\\"project2\\"",
+          "\\"!project2\\"",
         ]
       `);
     });

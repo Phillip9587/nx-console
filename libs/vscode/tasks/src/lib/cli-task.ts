@@ -1,62 +1,81 @@
-import { checkIsNxWorkspace } from '@nx-console/shared/utils';
-import { getShellExecutionForConfig } from '@nx-console/vscode/utils';
-import { Task, TaskGroup, TaskScope } from 'vscode';
+import { NxWorkspace } from '@nx-console/shared-types';
+import { getPackageManagerCommand } from '@nx-console/shared-utils';
+import { getNxWorkspace } from '@nx-console/vscode-nx-workspace';
+import { getShellExecutionForConfig } from '@nx-console/vscode-utils';
+import type { PackageManagerCommands } from 'nx/src/utils/package-manager';
+import { join } from 'path';
+import { Task, TaskScope } from 'vscode';
 import { CliTaskDefinition } from './cli-task-definition';
 
 export class CliTask extends Task {
+  /**
+   * workspace & packageManagerCommands can be passed in to increase performance when creating multiple tasks
+   * if you don't pass them in, they will fetched for you
+   */
   static async create(
     definition: CliTaskDefinition,
-    workspacePath: string
-  ): Promise<CliTask> {
-    const { command } = definition;
-
+    workspace?: NxWorkspace,
+    packageManagerCommands?: PackageManagerCommands
+  ): Promise<CliTask | undefined> {
     // Using `run [project]:[command]` is more backwards compatible in case different
     // versions of CLI does not handle `[command] [project]` args.
     const args = getArgs(definition);
 
-    const useNxCli = await checkIsNxWorkspace(workspacePath);
+    const nxWorkspace = workspace ?? (await getNxWorkspace());
+    if (!nxWorkspace) {
+      return;
+    }
+    const { isEncapsulatedNx, workspacePath } = nxWorkspace;
 
-    const displayCommand = useNxCli
-      ? `nx ${args.join(' ')}`
-      : `ng ${args.join(' ')}`;
+    const displayCommand = `nx ${args.join(' ')}`;
 
     const task = new CliTask(
-      { ...definition, type: useNxCli ? 'nx' : 'ng' }, // definition
+      { ...definition, type: 'nx' }, // definition
       TaskScope.Workspace, // scope
       displayCommand, // name
-      useNxCli ? 'nx' : 'ng',
+      'nx',
       // execution
-      getShellExecutionForConfig({
-        displayCommand,
-        cwd: workspacePath,
-      })
+      await getShellExecutionForConfig(
+        {
+          displayCommand,
+          cwd: definition.cwd
+            ? join(workspacePath, definition.cwd)
+            : workspacePath,
+          encapsulatedNx: isEncapsulatedNx,
+          workspacePath,
+          env: definition.env,
+        },
+        packageManagerCommands
+      )
     );
 
-    switch (command) {
-      case 'build':
-        task.group = TaskGroup.Build;
-        task.problemMatchers.push('$webpack-builder');
-        break;
-      default:
-        task.group = TaskGroup.Test;
+    return task;
+  }
+
+  static async batchCreate(
+    definitions: CliTaskDefinition[],
+    workspace?: NxWorkspace
+  ): Promise<CliTask[]> {
+    const w = workspace ?? (await getNxWorkspace());
+
+    if (!w) {
+      return [];
     }
 
-    return task;
+    const packageManagerCommands = await getPackageManagerCommand(
+      w.workspacePath
+    );
+    const tasks = await Promise.all(
+      definitions.map((definition) =>
+        this.create(definition, w, packageManagerCommands)
+      )
+    );
+    return tasks.filter((task) => task !== undefined) as CliTask[];
   }
 }
 
 function getArgs(definition: CliTaskDefinition) {
   const { positional, command, flags } = definition;
-  switch (command) {
-    case 'add':
-    case 'build':
-    case 'lint':
-    case 'generate':
-    case 'run':
-    case 'serve':
-    case 'test':
-      return [command, positional, ...flags];
-    default:
-      return ['run', `${positional}:${command}`, ...flags];
-  }
+  const args = [command, positional, ...flags];
+  return args.filter((v) => v !== undefined && v !== null);
 }

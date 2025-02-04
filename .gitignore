@@ -2,17 +2,18 @@
 
 # compiled output
 /dist
+build/
 /tmp
 /out-tsc
 /osbuilds
 /.angular
 /cypress
+**/out-tsc
 
 # dependencies
 **/node_modules
 .pnp.*
 .yarn/*
-!.yarn/cache
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
@@ -21,7 +22,6 @@
 
 # IDEs and editors
 /.idea
-/.vscode
 .project
 .classpath
 .c9/
@@ -48,23 +48,32 @@ yarn-error.log
 testem.log
 *.log
 /typings
+**/test-output
 
 # System Files
 .DS_Store
 Thumbs.db
 
 #Environment
-.env
-
+.env.local
 
 # Intellij
-apps/intellij/gen/ngConsoleCli/*
-apps/intellij/build/*
-apps/intellij/.gradle/*
-apps/intellij/.idea/*
+.gradle
+.qodana
+apps/intellij/bin/
+.intellijPlatform
+.kotlin/
+
 
 # WDIO
 **/.wdio-vscode-service
 apps/vscode-e2e/.screenshots
 **/dist
 
+.angular
+
+.nx/cache
+.nx/workspace-data
+.nx/powerpack
+**/cypress/downloads
+migrations.json

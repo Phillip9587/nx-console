@@ -1,4 +1,4 @@
-import { nxWorkspace } from '@nx-console/language-server/workspace';
+import { nxWorkspace } from '@nx-console/language-server-workspace';
 import {
   ASTNode,
   CompletionItem,
@@ -16,11 +16,11 @@ export async function projectCompletion(
     return [];
   }
 
-  const { workspace } = await nxWorkspace(workingPath);
+  const { projectGraph } = await nxWorkspace(workingPath);
 
   const projectCompletion: CompletionItem[] = [];
 
-  for (const projectName of Object.keys(workspace.projects)) {
+  for (const projectName of Object.keys(projectGraph.nodes)) {
     projectCompletion.push(
       createCompletionItem(
         projectName,

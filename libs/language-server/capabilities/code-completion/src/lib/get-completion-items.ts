@@ -1,11 +1,16 @@
 import {
+  getDefaultCompletionType,
+  isArrayNode,
+  lspLogger,
+} from '@nx-console/language-server-utils';
+import {
   CompletionType,
   hasCompletionGlob,
   hasCompletionType,
   X_COMPLETION_GLOB,
   X_COMPLETION_TYPE,
-} from '@nx-console/shared/json-schema';
-import { getDefaultCompletionType } from '@nx-console/language-server/utils';
+} from '@nx-console/shared-json-schema';
+import { NxVersion } from '@nx-console/nx-version';
 import {
   ASTNode,
   CompletionItem,
@@ -14,6 +19,7 @@ import {
   Position,
   TextDocument,
 } from 'vscode-json-languageservice';
+import { inferencePluginsCompletion } from './inference-plugins-completion';
 import { inputNameCompletion } from './input-name-completion';
 import { pathCompletion } from './path-completion';
 import { projectCompletion } from './project-completion';
@@ -23,6 +29,7 @@ import { targetsCompletion } from './targets-completion';
 
 export async function getCompletionItems(
   workingPath: string | undefined,
+  nxVersion: NxVersion,
   jsonAst: JSONDocument,
   document: TextDocument,
   schemas: MatchingSchema[],
@@ -38,7 +45,9 @@ export async function getCompletionItems(
     return [];
   }
 
-  const items = completionItems(workingPath, node, document);
+  const items = completionItems(workingPath, nxVersion, node, document);
+
+  let resolvedItems: CompletionItem[] = [];
 
   for (const { schema, node: schemaNode } of schemas) {
     // Find the schema node that matches the current node
@@ -47,25 +56,41 @@ export async function getCompletionItems(
       if (hasCompletionType(schema)) {
         const completion = schema[X_COMPLETION_TYPE];
         if (hasCompletionGlob(schema)) {
-          return items(completion, schema[X_COMPLETION_GLOB]);
+          resolvedItems = await items(completion, schema[X_COMPLETION_GLOB]);
+          break;
         }
 
-        return items(completion);
+        resolvedItems = await items(completion);
+        break;
       }
     }
   }
 
   const defaultCompletion = getDefaultCompletionType(node);
 
-  if (defaultCompletion) {
-    return items(defaultCompletion.completionType, defaultCompletion.glob);
+  if (defaultCompletion && resolvedItems.length === 0) {
+    resolvedItems = await items(
+      defaultCompletion.completionType,
+      defaultCompletion.glob
+    );
   }
 
-  return [];
+  // remove duplicate values from the resolved completed items
+  if (isArrayNode(node.parent)) {
+    const existingItems = node.parent.children.map((i) =>
+      JSON.stringify(i.value)
+    );
+    resolvedItems = resolvedItems.filter(
+      (resolvedItem) => !existingItems.includes(resolvedItem.label)
+    );
+  }
+
+  return resolvedItems;
 }
 
 function completionItems(
   workingPath: string,
+  nxVersion: NxVersion,
   node: ASTNode,
   document: TextDocument
 ) {
@@ -73,17 +98,22 @@ function completionItems(
     completion: CompletionType,
     glob?: string
   ): Promise<CompletionItem[]> => {
+    // const supportsInterpolation = gte(nxVersion, '16.0.0');
+    // todo(jcammisuli): change this once executors support {workspaceRoot} and {projectRoot} in their options
+    const supportsInterpolation = false;
     switch (completion) {
       case CompletionType.file: {
         return pathCompletion(workingPath, node, document, {
           glob: glob ?? '*.*',
           searchType: 'file',
+          supportsInterpolation,
         });
       }
       case CompletionType.directory: {
         return pathCompletion(workingPath, node, document, {
           glob: glob ?? '*',
           searchType: 'directory',
+          supportsInterpolation,
         });
       }
       case CompletionType.projectTarget: {
@@ -102,10 +132,16 @@ function completionItems(
         return targetsCompletion(workingPath, node, document, true);
       }
       case CompletionType.inputName: {
+        lspLogger.log(`inputName completion ${node.value}`);
         return inputNameCompletion(workingPath, node, document);
       }
       case CompletionType.inputNameWithDeps: {
+        lspLogger.log(`inputNameWithDeps completion ${node.value}`);
         return inputNameCompletion(workingPath, node, document, true);
+      }
+      case CompletionType.inferencePlugins: {
+        lspLogger.log(`inferencePlugins completion ${node.value}`);
+        return inferencePluginsCompletion(workingPath);
       }
       default: {
         return [];

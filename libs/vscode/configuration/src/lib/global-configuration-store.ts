@@ -5,7 +5,7 @@ import {
   workspace,
   Memento,
 } from 'vscode';
-import { Store } from '@nx-console/shared/schema';
+import { Store } from '@nx-console/shared-schema';
 import {
   GLOBAL_CONFIG_KEYS,
   GlobalConfigKeys,
@@ -49,8 +49,12 @@ export class GlobalConfigurationStore implements Store {
     return typeof value === 'undefined' ? defaultValue || null : value;
   }
 
-  set<T>(key: GlobalConfigKeys, value: T): void {
-    this.storage(key).update(key, value);
+  set<T>(
+    key: GlobalConfigKeys,
+    value: T,
+    configurationTarget?: ConfigurationTarget
+  ): void {
+    this.storage(key).update(key, value, configurationTarget);
     this._onConfigurationChange.fire();
   }
 

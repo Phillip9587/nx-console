@@ -1,5 +1,7 @@
 import { JSONSchema } from 'vscode-json-languageservice';
 import { CompletionType } from './completion-type';
+import { NxVersion } from '@nx-console/nx-version';
+import { gte } from '@nx-console/nx-version';
 
 export const implicitDependencies: JSONSchema = {
   type: 'array',
@@ -17,7 +19,7 @@ export const outputs: JSONSchema = {
   },
 };
 
-export const inputs: JSONSchema[] = [
+export const inputs = (nxVersion: NxVersion): JSONSchema[] => [
   { type: 'string', 'x-completion-type': CompletionType.inputNameWithDeps },
   {
     type: 'object',
@@ -26,10 +28,7 @@ export const inputs: JSONSchema[] = [
         type: 'string',
         'x-completion-type': CompletionType.inputName,
       },
-      projects: {
-        type: 'string',
-        enum: ['self', 'dependencies'],
-      },
+      projects: projects(nxVersion),
     },
   },
   {
@@ -58,12 +57,15 @@ export const inputs: JSONSchema[] = [
   },
 ];
 
-export const namedInputs: JSONSchema = {
+export const namedInputs = (nxVersion: NxVersion): JSONSchema => ({
   type: 'object',
   additionalProperties: {
-    oneOf: inputs,
+    type: 'array',
+    items: {
+      oneOf: inputs(nxVersion),
+    },
   },
-};
+});
 
 export const tags: JSONSchema = {
   type: 'array',
@@ -73,7 +75,35 @@ export const tags: JSONSchema = {
   },
 };
 
-export const targets = (executors?: JSONSchema[]): JSONSchema => {
+const projects = (nxVersion: NxVersion): JSONSchema => {
+  if (!gte(nxVersion, '16.0.0')) {
+    return {
+      type: 'string',
+      enum: ['self', 'dependencies'],
+    };
+  } else {
+    return {
+      oneOf: [
+        {
+          type: 'string',
+          'x-completion-type': CompletionType.projects,
+        },
+        {
+          type: 'array',
+          items: {
+            type: 'string',
+            'x-completion-type': CompletionType.projects,
+          },
+        },
+      ],
+    };
+  }
+};
+
+export const targets = (
+  nxVersion: NxVersion,
+  executors?: JSONSchema[]
+): JSONSchema => {
   const schema: JSONSchema = {
     additionalProperties: {
       type: 'object',
@@ -94,10 +124,7 @@ export const targets = (executors?: JSONSchema[]): JSONSchema => {
               {
                 type: 'object',
                 properties: {
-                  projects: {
-                    type: 'string',
-                    enum: ['self', 'dependencies'],
-                  },
+                  projects: projects(nxVersion),
                   target: {
                     type: 'string',
                     'x-completion-type': CompletionType.targets,
@@ -114,7 +141,7 @@ export const targets = (executors?: JSONSchema[]): JSONSchema => {
         inputs: {
           type: 'array',
           items: {
-            oneOf: inputs,
+            oneOf: inputs(nxVersion),
           },
         },
       },

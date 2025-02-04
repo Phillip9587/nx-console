@@ -8,32 +8,17 @@ import {
   OptionPropertyDescription,
   XPrompt,
 } from './schema';
-import { Schema } from 'nx/src/utils/params';
-import { names } from '@nrwl/devkit/src/utils/names';
+import type { Schema } from 'nx/src/utils/params';
 
 export interface GeneratorDefaults {
   [name: string]: string;
 }
 
-const IMPORTANT_FIELD_NAMES = [
-  'name',
-  'project',
-  'module',
-  'watch',
-  'style',
-  'directory',
-  'port',
-];
-const IMPORTANT_FIELDS_SET = new Set(IMPORTANT_FIELD_NAMES);
-
 export async function normalizeSchema(
   s: Schema,
-  workspaceType: 'ng' | 'nx',
   projectDefaults?: GeneratorDefaults
 ): Promise<Option[]> {
-  // TODO(cammisuli): check what version ng supports hyphenated args
-  const hyphenate = workspaceType === 'ng';
-  const options = schemaToOptions(s, { hyphenate });
+  const options = schemaToOptions(s);
   const requiredFields = new Set(s.required || []);
 
   const nxOptions = options.map((option) => {
@@ -44,7 +29,7 @@ export async function normalizeSchema(
 
     const nxOption: Option = {
       ...option,
-      isRequired: isFieldRequired(requiredFields, option, xPrompt, $default),
+      isRequired: isFieldRequired(requiredFields, option),
       aliases: option.alias ? [option.alias] : [],
       ...(workspaceDefault !== undefined && { default: workspaceDefault }),
       ...($default && { $default }),
@@ -60,7 +45,11 @@ export async function normalizeSchema(
       nxOption.itemTooltips = getEnumTooltips(xPrompt);
       if (isLongFormXPrompt(xPrompt) && !nxOption.items) {
         const items = (xPrompt.items || []).map((item) =>
-          isOptionItemLabelValue(item) ? item.value : item
+          isOptionItemLabelValue(item)
+            ? typeof item.value === 'string'
+              ? item.value
+              : JSON.stringify(item.value)
+            : item
         );
         if (items.length > 0) {
           nxOption.items = items;
@@ -71,53 +60,106 @@ export async function normalizeSchema(
     return nxOption;
   });
 
-  return nxOptions.sort((a, b) => {
+  // since some folks are using Nx Console with older versions,
+  // we need to make sure their options are sorted like before
+  const optionComparator = nxOptions.some(
+    (option) => option['x-priority'] !== undefined
+  )
+    ? compareOptions
+    : legacyCompareOptions;
+
+  return nxOptions.sort(optionComparator);
+}
+
+/**
+ * sorts options in the following order
+ * - required
+ * - x-priority: important
+ * - everything else
+ * - x-priority: internal
+ * - deprecated
+ * if two options are equal, they are sorted by whether they are positional args and name
+ */
+function compareOptions(a: Option, b: Option): number {
+  function getPrio(opt: Option): number {
+    if (opt.isRequired) {
+      return 0;
+    }
+    if (opt['x-priority'] === 'important') {
+      return 1;
+    }
+    if (opt['x-deprecated']) {
+      return 4;
+    }
+    if (opt['x-priority'] === 'internal') {
+      return 3;
+    }
+    return 2;
+  }
+
+  const aPrio = getPrio(a);
+  const bPrio = getPrio(b);
+  if (aPrio === bPrio) {
     if (typeof a.positional === 'number' && typeof b.positional === 'number') {
       return a.positional - b.positional;
     }
-
     if (typeof a.positional === 'number') {
       return -1;
     } else if (typeof b.positional === 'number') {
       return 1;
-    } else if (a.isRequired) {
-      if (b.isRequired) {
-        return a.name.localeCompare(b.name);
-      }
-      return -1;
-    } else if (b.isRequired) {
-      return 1;
-    } else if (IMPORTANT_FIELDS_SET.has(a.name)) {
-      if (IMPORTANT_FIELDS_SET.has(b.name)) {
-        return (
-          IMPORTANT_FIELD_NAMES.indexOf(a.name) -
-          IMPORTANT_FIELD_NAMES.indexOf(b.name)
-        );
-      }
-      return -1;
-    } else if (IMPORTANT_FIELDS_SET.has(b.name)) {
-      return 1;
-    } else {
+    }
+    return a.name.localeCompare(b.name);
+  }
+  return aPrio - bPrio;
+}
+
+function legacyCompareOptions(a: Option, b: Option): number {
+  const IMPORTANT_FIELD_NAMES = [
+    'name',
+    'project',
+    'module',
+    'watch',
+    'style',
+    'directory',
+    'port',
+  ];
+  const IMPORTANT_FIELDS_SET = new Set(IMPORTANT_FIELD_NAMES);
+  if (typeof a.positional === 'number' && typeof b.positional === 'number') {
+    return a.positional - b.positional;
+  }
+
+  if (typeof a.positional === 'number') {
+    return -1;
+  } else if (typeof b.positional === 'number') {
+    return 1;
+  } else if (a.isRequired) {
+    if (b.isRequired) {
       return a.name.localeCompare(b.name);
     }
-  });
+    return -1;
+  } else if (b.isRequired) {
+    return 1;
+  } else if (IMPORTANT_FIELDS_SET.has(a.name)) {
+    if (IMPORTANT_FIELDS_SET.has(b.name)) {
+      return (
+        IMPORTANT_FIELD_NAMES.indexOf(a.name) -
+        IMPORTANT_FIELD_NAMES.indexOf(b.name)
+      );
+    }
+    return -1;
+  } else if (IMPORTANT_FIELDS_SET.has(b.name)) {
+    return 1;
+  } else {
+    return a.name.localeCompare(b.name);
+  }
 }
 
 function isFieldRequired(
   requiredFields: Set<string>,
-  nxOption: CliOption,
-  xPrompt: XPrompt | undefined,
-  $default: any
+  nxOption: CliOption
 ): boolean {
   // checks schema.json requiredFields and xPrompt for required
-  return (
-    requiredFields.has(nxOption.name) ||
-    // makes xPrompt fields required so nx command can run with --no-interactive
-    // - except properties with a default (also falsey, empty, null)
-    // - except properties with a $default $source
-    // - except boolean properties (should also have default of `true`)
-    (!!xPrompt && !nxOption.default && !$default && nxOption.type !== 'boolean')
-  );
+  return requiredFields.has(nxOption.name);
 }
 
 function getItems(option: CliOption): { items: string[] } | undefined {
@@ -155,10 +197,7 @@ function isOptionItemLabelValue(
   );
 }
 
-function schemaToOptions(
-  schema: Schema,
-  config?: { hyphenate: boolean }
-): CliOption[] {
+function schemaToOptions(schema: Schema): CliOption[] {
   return Object.keys(schema.properties || {}).reduce<CliOption[]>(
     (cliOptions, option) => {
       const currentProperty = schema.properties[option];
@@ -172,9 +211,8 @@ function schemaToOptions(
       if (!visible) {
         return cliOptions;
       }
-      const name = config?.hyphenate ? names(option).fileName : option;
       cliOptions.push({
-        name,
+        name: option,
         originalName: option,
         positional,
         ...currentProperty,

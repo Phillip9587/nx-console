@@ -1,36 +1,47 @@
-import { getNxWorkspaceProjects } from '@nx-console/vscode/nx-workspace';
 import {
   BaseView,
+  ProjectGraphErrorViewItem,
   ProjectViewItem,
-  ProjectViewStrategy,
+  TargetGroupViewItem,
   TargetViewItem,
 } from './nx-project-base-view';
 
-export type ListViewItem = ProjectViewItem | TargetViewItem;
+export type ListViewItem =
+  | ProjectViewItem
+  | TargetViewItem
+  | TargetGroupViewItem
+  | ProjectGraphErrorViewItem;
 
-export type ListViewStrategy = ProjectViewStrategy<ListViewItem>;
-
-export function createListViewStrategy(): ListViewStrategy {
-  const listView = new ListView();
-  return {
-    getChildren: listView.getChildren.bind(listView),
-  };
-}
-
-class ListView extends BaseView {
+export class ListView extends BaseView {
   async getChildren(element?: ListViewItem) {
     if (!element) {
+      const items: ListViewItem[] = [];
+      if (this.workspaceData?.errors) {
+        items.push(
+          this.createProjectGraphErrorViewItem(this.workspaceData.errors.length)
+        );
+      }
       // should return root elements if no element was passed
-      return this.createProjects();
+      items.push(...(await this.createProjects()));
+      return items;
     }
     if (element.contextValue === 'project') {
-      return this.createTargetsFromProject(element);
+      return this.createTargetsAndGroupsFromProject(element);
+    }
+    if (element.contextValue === 'targetGroup') {
+      return this.createTargetsFromTargetGroup(element);
+    }
+    if (element.contextValue === 'projectGraphError') {
+      return [];
     }
     return this.createConfigurationsFromTarget(element);
   }
 
   private async createProjects() {
-    const projectDefs = await getNxWorkspaceProjects();
+    const projectDefs = await this.getProjectData();
+    if (!projectDefs) {
+      return [];
+    }
     return Object.entries(projectDefs).map((project) =>
       this.createProjectViewItem(project)
     );

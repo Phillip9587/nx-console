@@ -4,10 +4,34 @@
   "include": [],
   "references": [
     {
-      "path": "./tsconfig.lib.json"
+      "path": "../telemetry"
     },
     {
-      "path": "./tsconfig.spec.json"
+      "path": "../output-channels"
+    },
+    {
+      "path": "../nx-workspace"
+    },
+    {
+      "path": "../nx-cli-quickpicks"
+    },
+    {
+      "path": "../configuration"
+    },
+    {
+      "path": "../../shared/utils"
+    },
+    {
+      "path": "../../shared/nx-version"
+    },
+    {
+      "path": "../../shared/npm"
+    },
+    {
+      "path": "../utils"
+    },
+    {
+      "path": "./tsconfig.lib.json"
     }
   ]
 }

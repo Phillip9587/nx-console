@@ -1,0 +1,31 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "files": [],
+  "include": [],
+  "references": [
+    {
+      "path": "../configuration"
+    },
+    {
+      "path": "../../shared/generate-ui-types"
+    },
+    {
+      "path": "../telemetry"
+    },
+    {
+      "path": "../tasks"
+    },
+    {
+      "path": "../nx-workspace"
+    },
+    {
+      "path": "../nx-project-view"
+    },
+    {
+      "path": "../nx-cli-quickpicks"
+    },
+    {
+      "path": "./tsconfig.lib.json"
+    }
+  ]
+}

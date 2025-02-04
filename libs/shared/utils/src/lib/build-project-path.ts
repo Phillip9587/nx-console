@@ -1,5 +1,5 @@
 import { join } from 'path';
-import { fileExists } from '@nx-console/shared/file-system';
+import { fileExists } from '@nx-console/shared-file-system';
 
 /**
  * Builds the project path from the given project name.
@@ -20,4 +20,5 @@ export async function buildProjectPath(
   } else if (await fileExists(packageJsonPath)) {
     return packageJsonPath;
   }
+  return;
 }

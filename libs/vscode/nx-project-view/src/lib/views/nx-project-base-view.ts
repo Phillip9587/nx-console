@@ -1,23 +1,19 @@
-import { ProjectConfiguration, TargetConfiguration } from '@nrwl/devkit';
-import { getNxWorkspaceProjects } from '@nx-console/vscode/nx-workspace';
-import { CliTaskProvider } from '@nx-console/vscode/tasks';
-import { getOutputChannel, getWorkspacePath } from '@nx-console/vscode/utils';
+import { NxWorkspace } from '@nx-console/shared-types';
+import { getNxWorkspaceProjects } from '@nx-console/vscode-nx-workspace';
+import { getOutputChannel } from '@nx-console/vscode-output-channels';
+import { getWorkspacePath } from '@nx-console/vscode-utils';
 import { join } from 'node:path';
-
-export interface ProjectViewStrategy<T> {
-  getChildren(element?: T): Promise<T[] | undefined>;
-}
-
-export type ViewDataProvider = Pick<
-  CliTaskProvider,
-  'getWorkspacePath' | 'getProjects'
->;
+import type {
+  ProjectGraphProjectNode,
+  TargetConfiguration,
+} from 'nx/src/devkit-exports';
+import { TreeItemCollapsibleState } from 'vscode';
 
 interface BaseViewItem<Context extends string> {
   id: string;
   contextValue: Context;
   label: string;
-  collapsible: Collapsible;
+  collapsible: TreeItemCollapsibleState;
 }
 
 export interface FolderViewItem extends BaseViewItem<'folder'> {
@@ -33,9 +29,19 @@ export interface ProjectViewItem extends BaseViewItem<'project'> {
 export interface TargetViewItem extends BaseViewItem<'target'> {
   nxProject: NxProject;
   nxTarget: NxTarget;
+  nonAtomizedTarget?: string;
 }
 
-export type Collapsible = 'None' | 'Collapsed' | 'Expanded';
+export interface TargetGroupViewItem extends BaseViewItem<'targetGroup'> {
+  nxProject: NxProject;
+  nxTargets: NxTarget[];
+  targetGroupName: string;
+}
+
+export interface ProjectGraphErrorViewItem
+  extends BaseViewItem<'projectGraphError'> {
+  errorCount: number;
+}
 
 export interface NxProject {
   project: string;
@@ -48,10 +54,18 @@ export interface NxTarget {
 }
 
 export abstract class BaseView {
-  createProjectViewItem([projectName, { root, name, targets }]: [
-    projectName: string,
-    projectDefinition: ProjectConfiguration
-  ]): ProjectViewItem {
+  workspaceData: NxWorkspace | undefined = undefined;
+
+  createProjectViewItem(
+    [projectName, projectGraphNode]: [
+      projectName: string,
+      projectDefinition: ProjectGraphProjectNode
+    ],
+    collapsible = TreeItemCollapsibleState.Collapsed
+  ): ProjectViewItem {
+    const {
+      data: { root, name, targets },
+    } = projectGraphNode;
     const hasChildren =
       !targets ||
       Object.keys(targets).length !== 0 ||
@@ -66,48 +80,98 @@ export abstract class BaseView {
     }
 
     return {
-      id: projectName,
+      id: `${projectName}`,
       contextValue: 'project',
       nxProject,
       label: projectName,
       resource: join(getWorkspacePath(), nxProject.root ?? ''),
-      collapsible: hasChildren ? 'Collapsed' : 'None',
+      collapsible: hasChildren ? collapsible : TreeItemCollapsibleState.None,
     };
   }
 
-  async createTargetsFromProject(parent: ProjectViewItem) {
+  async createTargetsAndGroupsFromProject(
+    parent: ProjectViewItem
+  ): Promise<(TargetViewItem | TargetGroupViewItem)[] | undefined> {
     const { nxProject } = parent;
 
-    const projectDef = (await getNxWorkspaceProjects())[nxProject.project];
+    const projectDef = (await this.getProjectData())?.[nxProject.project];
     if (!projectDef) {
       return;
     }
 
-    const { targets } = projectDef;
+    const { targets } = projectDef.data;
     if (!targets) {
       return;
     }
 
-    return Object.entries(targets).map((target) =>
-      this.createTargetTreeItem(nxProject, target)
-    );
+    if (!projectDef.data.metadata?.targetGroups) {
+      return Object.entries(targets).map((target) =>
+        this.createTargetTreeItem(nxProject, target)
+      );
+    }
+
+    const targetGroupMap = new Map<string, string[]>();
+    const nonGroupedTargets: Set<string> = new Set(Object.keys(targets));
+
+    for (const [targetGroupName, targets] of Object.entries(
+      projectDef.data.metadata.targetGroups
+    )) {
+      if (!targetGroupMap.has(targetGroupName)) {
+        targetGroupMap.set(targetGroupName, []);
+      }
+      for (const target of targets) {
+        targetGroupMap.get(targetGroupName)?.push(target);
+        nonGroupedTargets.delete(target);
+      }
+    }
+
+    return [
+      ...Array.from(targetGroupMap.entries()).map(
+        ([targetGroupName, targets]) =>
+          this.createTargetGroupTreeItem(nxProject, targetGroupName, targets)
+      ),
+      ...Array.from(nonGroupedTargets).map((targetName) =>
+        this.createTargetTreeItem(nxProject, [targetName, targets[targetName]])
+      ),
+    ];
   }
 
   createTargetTreeItem(
     nxProject: NxProject,
-    [targetName, { configurations }]: [
+    [targetName, { configurations, metadata }]: [
       targetName: string,
       targetDefinition: TargetConfiguration
     ]
   ): TargetViewItem {
-    const hasChildren = !!configurations;
+    const hasChildren =
+      configurations && Object.keys(configurations).length > 0;
+
     return {
       id: `${nxProject.project}:${targetName}`,
       contextValue: 'target',
       nxProject,
       nxTarget: { name: targetName },
       label: targetName,
-      collapsible: hasChildren ? 'Collapsed' : 'None',
+      nonAtomizedTarget: metadata?.nonAtomizedTarget,
+      collapsible: hasChildren
+        ? TreeItemCollapsibleState.Collapsed
+        : TreeItemCollapsibleState.None,
+    };
+  }
+
+  createTargetGroupTreeItem(
+    nxProject: NxProject,
+    targetGroupName: string,
+    targetNames: string[]
+  ): TargetGroupViewItem {
+    return {
+      id: `${nxProject.project}:${targetGroupName}`,
+      contextValue: 'targetGroup',
+      nxProject,
+      nxTargets: [...new Set(targetNames)].map((name) => ({ name })),
+      targetGroupName,
+      label: targetGroupName,
+      collapsible: TreeItemCollapsibleState.Collapsed,
     };
   }
 
@@ -116,12 +180,13 @@ export abstract class BaseView {
   ): Promise<TargetViewItem[] | undefined> {
     const { nxProject, nxTarget } = parent;
 
-    const projectDef = (await getNxWorkspaceProjects())[nxProject.project];
+    const projectDef = (await this.getProjectData())?.[nxProject.project];
+
     if (!projectDef) {
       return;
     }
 
-    const { targets } = projectDef;
+    const { targets } = projectDef.data;
     if (!targets) {
       return;
     }
@@ -142,7 +207,51 @@ export abstract class BaseView {
       nxProject,
       nxTarget: { name: nxTarget.name, configuration },
       label: configuration,
-      collapsible: 'None',
+      collapsible: TreeItemCollapsibleState.None,
     }));
+  }
+
+  async createTargetsFromTargetGroup(
+    parent: TargetGroupViewItem
+  ): Promise<TargetViewItem[] | undefined> {
+    const { nxProject } = parent;
+
+    const projectDef = (await this.getProjectData())?.[nxProject.project];
+
+    if (!projectDef) {
+      return;
+    }
+
+    const { targets } = projectDef.data;
+    if (!targets) {
+      return;
+    }
+
+    return parent.nxTargets
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((target) =>
+        this.createTargetTreeItem(nxProject, [
+          target.name,
+          targets[target.name],
+        ])
+      );
+  }
+
+  createProjectGraphErrorViewItem(count: number): ProjectGraphErrorViewItem {
+    return {
+      id: 'projectGraphError',
+      contextValue: 'projectGraphError',
+      errorCount: count,
+      label: `Project Graph Error`,
+      collapsible: TreeItemCollapsibleState.None,
+    };
+  }
+
+  protected async getProjectData() {
+    if (this.workspaceData?.projectGraph.nodes) {
+      return this.workspaceData.projectGraph.nodes;
+    } else {
+      return await getNxWorkspaceProjects();
+    }
   }
 }

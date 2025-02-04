@@ -1,11 +1,10 @@
 import type { PnpApi } from '@yarnpkg/pnp';
 import { join } from 'path';
-import { fileExists } from '@nx-console/shared/file-system';
-declare function __non_webpack_require__(importPath: string): any;
+import { fileExists } from '@nx-console/shared-file-system';
 
 let PNP_API: PnpApi;
 
-async function getPnpFile(workspacePath: string) {
+export async function getPnpFile(workspacePath: string) {
   const extensions = ['.cjs', '.js'];
   for (const ext of extensions) {
     try {
@@ -27,7 +26,8 @@ async function pnpApi(workspacePath: string) {
   }
 
   if (!PNP_API) {
-    const pnp = __non_webpack_require__(pnpFile);
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pnp = require(pnpFile);
     pnp.setup();
     PNP_API = pnp;
   }
@@ -59,7 +59,9 @@ export async function pnpDependencies(workspacePath: string) {
     if (!pkg?.packageDependencies) {
       continue;
     }
-    for (const [name, reference] of pkg?.packageDependencies ?? {}) {
+    for (const [name, reference] of Object.entries(
+      pkg?.packageDependencies ?? {}
+    )) {
       // Unmet peer dependencies
       if (reference === null) continue;
       if (!Array.isArray(reference) && reference.startsWith('workspace:'))
